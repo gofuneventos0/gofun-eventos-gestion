@@ -3,6 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { esModoLocal } from "@/lib/supabase/env";
+import {
+  guardarEvento as guardarEventoLocal,
+  cambiarEstadoEvento as cambiarEstadoEventoLocal,
+  borrarEvento as borrarEventoLocal,
+} from "@/lib/local/repo";
 import type { EstadoEvento } from "@/lib/types";
 import { requiereSesion } from "./utils";
 import { texto, numero, type Resultado } from "./form";
@@ -65,6 +71,27 @@ export async function guardarEvento(
   };
 
   const lineas = parsearLineas(formData);
+
+  // Modo local: SQLite administra el evento y sus líneas en una sola transacción.
+  if (esModoLocal()) {
+    // El redirect va FUERA del try/catch: redirect() lanza un error interno
+    // (NEXT_REDIRECT) que el catch no debe capturar.
+    let nuevoId: string;
+    try {
+      ({ id: nuevoId } = guardarEventoLocal({ ...fila, id }, lineas));
+    } catch (e) {
+      return {
+        ok: false,
+        mensaje: e instanceof Error ? e.message : "Error al guardar el evento.",
+      };
+    }
+    revalidatePath("/calendario");
+    revalidatePath("/eventos");
+    revalidatePath("/panel");
+    revalidatePath(`/eventos/${nuevoId}`);
+    redirect(`/eventos/${nuevoId}`);
+  }
+
   const supabase = await createClient();
 
   let eventoId = id;
@@ -110,6 +137,23 @@ export async function cambiarEstadoEvento(
   estado: EstadoEvento
 ): Promise<Resultado> {
   await requiereSesion();
+
+  if (esModoLocal()) {
+    try {
+      cambiarEstadoEventoLocal(id, estado);
+    } catch (e) {
+      return {
+        ok: false,
+        mensaje: e instanceof Error ? e.message : "Error al actualizar el estado.",
+      };
+    }
+    revalidatePath("/calendario");
+    revalidatePath("/eventos");
+    revalidatePath(`/eventos/${id}`);
+    revalidatePath("/panel");
+    return { ok: true, mensaje: "Estado actualizado." };
+  }
+
   const supabase = await createClient();
   const { error } = await supabase.from("eventos").update({ estado }).eq("id", id);
 
@@ -124,6 +168,22 @@ export async function cambiarEstadoEvento(
 
 export async function borrarEvento(id: string): Promise<Resultado> {
   await requiereSesion();
+
+  if (esModoLocal()) {
+    try {
+      borrarEventoLocal(id);
+    } catch (e) {
+      return {
+        ok: false,
+        mensaje: e instanceof Error ? e.message : "Error al eliminar el evento.",
+      };
+    }
+    revalidatePath("/calendario");
+    revalidatePath("/eventos");
+    revalidatePath("/panel");
+    return { ok: true, mensaje: "Evento eliminado." };
+  }
+
   const supabase = await createClient();
   const { error } = await supabase.from("eventos").delete().eq("id", id);
 

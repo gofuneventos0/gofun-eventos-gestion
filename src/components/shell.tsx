@@ -14,7 +14,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
+import { salirSesion } from "@/lib/actions/auth";
 
 const NAV = [
   { href: "/panel", label: "Panel", icon: LayoutDashboard },
@@ -37,8 +37,7 @@ export default function Shell({
   const [abierto, setAbierto] = useState(false);
 
   async function salir() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
+    await salirSesion();
     router.replace("/login");
     router.refresh();
   }

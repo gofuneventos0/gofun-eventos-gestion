@@ -9,6 +9,29 @@ calendario de eventos y gestión económica del negocio de alquiler de hinchable
 
 ## Puesta en marcha
 
+### Opción A — Modo local (sin Supabase, ideal para probar ya)
+
+La app arranca sin configuración y funciona con una **base SQLite local**
+(`data/gofun.db`, ignorada por git) y una sesión propia:
+
+```bash
+npm install
+npm run dev
+```
+
+- **Usuario**: `admin` · **Contraseña**: `admin` (configurable en la tabla `usuarios`).
+- Abre [http://localhost:3000](http://localhost:3000) y entra con esas credenciales.
+- El catálogo y packs reales de la web se siembran automáticamente al primer arranque.
+
+Cuando quieras pasar a producción con el equipo, crea el proyecto de Supabase y
+rellena `.env.local` (opción B): la app detecta las credenciales y cambia a
+Supabase automáticamente sin tocar código.
+
+> El modo local es para desarrollo/pruebas. Para datos reales del negocio usa
+> Supabase (opción B), que tiene RLS y copias de seguridad.
+
+### Opción B — Supabase (producción)
+
 ### 1. Crear el proyecto de Supabase
 
 1. Crea un proyecto gratuito en [supabase.com](https://supabase.com/dashboard).

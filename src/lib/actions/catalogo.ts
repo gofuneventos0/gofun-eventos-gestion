@@ -2,6 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { esModoLocal } from "@/lib/supabase/env";
+import {
+  guardarAtraccion as guardarAtraccionLocal,
+  archivarAtraccion as archivarAtraccionLocal,
+  guardarPack as guardarPackLocal,
+  archivarPack as archivarPackLocal,
+} from "@/lib/local/repo";
 import { requiereSesion } from "./utils";
 import { texto, numero, booleano, type Resultado } from "./form";
 
@@ -38,6 +45,19 @@ export async function guardarAtraccion(
     activa: true,
   };
 
+  if (esModoLocal()) {
+    try {
+      guardarAtraccionLocal(fila);
+    } catch (e) {
+      return {
+        ok: false,
+        mensaje: e instanceof Error ? e.message : "Error al guardar la atracción.",
+      };
+    }
+    revalidatePath("/catalogo");
+    return { ok: true, mensaje: id ? "Atracción actualizada." : "Atracción creada." };
+  }
+
   const supabase = await createClient();
   const { error } = id
     ? await supabase.from("atracciones").update(fila).eq("id", id)
@@ -51,6 +71,18 @@ export async function guardarAtraccion(
 
 export async function archivarAtraccion(id: string): Promise<Resultado> {
   await requiereSesion();
+  if (esModoLocal()) {
+    try {
+      archivarAtraccionLocal(id);
+    } catch (e) {
+      return {
+        ok: false,
+        mensaje: e instanceof Error ? e.message : "Error al archivar la atracción.",
+      };
+    }
+    revalidatePath("/catalogo");
+    return { ok: true, mensaje: "Atracción archivada." };
+  }
   const supabase = await createClient();
   const { error } = await supabase.from("atracciones").update({ activa: false }).eq("id", id);
   if (error) return { ok: false, mensaje: error.message };
@@ -85,6 +117,19 @@ export async function guardarPack(
     activo: true,
   };
 
+  if (esModoLocal()) {
+    try {
+      guardarPackLocal(fila);
+    } catch (e) {
+      return {
+        ok: false,
+        mensaje: e instanceof Error ? e.message : "Error al guardar el pack.",
+      };
+    }
+    revalidatePath("/catalogo");
+    return { ok: true, mensaje: id ? "Pack actualizado." : "Pack creado." };
+  }
+
   const supabase = await createClient();
   const { error } = id
     ? await supabase.from("packs").update(fila).eq("id", id)
@@ -98,6 +143,18 @@ export async function guardarPack(
 
 export async function archivarPack(id: string): Promise<Resultado> {
   await requiereSesion();
+  if (esModoLocal()) {
+    try {
+      archivarPackLocal(id);
+    } catch (e) {
+      return {
+        ok: false,
+        mensaje: e instanceof Error ? e.message : "Error al archivar el pack.",
+      };
+    }
+    revalidatePath("/catalogo");
+    return { ok: true, mensaje: "Pack archivado." };
+  }
   const supabase = await createClient();
   const { error } = await supabase.from("packs").update({ activo: false }).eq("id", id);
   if (error) return { ok: false, mensaje: error.message };

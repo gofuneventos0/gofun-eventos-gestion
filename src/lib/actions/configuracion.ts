@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { esModoLocal } from "@/lib/supabase/env";
+import { guardarConfiguracion as guardarConfiguracionLocal } from "@/lib/local/repo";
 import { requiereSesion } from "./utils";
 import { texto, numero, type Resultado } from "./form";
 
@@ -27,6 +29,19 @@ export async function guardarConfiguracion(
     suplemento_8h: numero(formData, "suplemento_8h", 55),
     actualizado_en: new Date().toISOString(),
   };
+
+  if (esModoLocal()) {
+    try {
+      guardarConfiguracionLocal(fila);
+    } catch (e) {
+      return {
+        ok: false,
+        mensaje: e instanceof Error ? e.message : "Error al guardar la configuración.",
+      };
+    }
+    revalidatePath("/configuracion");
+    return { ok: true, mensaje: "Configuración guardada." };
+  }
 
   const supabase = await createClient();
   const { error } = await supabase.from("empresa_config").update(fila).eq("id", 1);

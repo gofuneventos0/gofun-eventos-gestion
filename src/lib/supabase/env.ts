@@ -27,6 +27,16 @@ export function isSupabaseConfigured(): boolean {
   );
 }
 
+/**
+ * Modo local: se usa cuando NO hay credenciales de Supabase reales.
+ * En ese caso la app funciona con una base SQLite local y una sesión propia
+ * (usuario por defecto: admin / admin). Al rellenar .env.local con
+ * credenciales reales y reiniciar, la app vuelve a Supabase automáticamente.
+ */
+export function esModoLocal(): boolean {
+  return !isSupabaseConfigured();
+}
+
 export function missingEnvMessage(): string {
   return (
     "Faltan las credenciales de Supabase en .env.local: " +

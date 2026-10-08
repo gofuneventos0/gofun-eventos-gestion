@@ -1,10 +1,10 @@
-import { isSupabaseConfigured } from "@/lib/supabase/env";
+import { esModoLocal } from "@/lib/supabase/env";
 import FormularioLogin from "./formulario";
 
 export const metadata = { title: "Acceso" };
 
 export default async function LoginPage(props: PageProps<"/login">) {
-  const configurado = isSupabaseConfigured();
+  const local = esModoLocal();
   const sp = await props.searchParams;
   const desde = typeof sp.desde === "string" ? sp.desde : "/panel";
 
@@ -29,35 +29,16 @@ export default async function LoginPage(props: PageProps<"/login">) {
           </p>
         </div>
 
-        {configurado ? (
-          <FormularioLogin desde={desde} />
-        ) : (
-          <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 p-6 text-sm text-amber-100">
-            <p className="mb-3 font-semibold">Falta conectar Supabase</p>
-            <ol className="list-decimal space-y-2 pl-5 leading-relaxed">
-              <li>
-                Crea un proyecto en{" "}
-                <a
-                  className="font-medium text-marca-400 underline"
-                  href="https://supabase.com"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  supabase.com
-                </a>{" "}
-                (plan gratuito).
-              </li>
-              <li>
-                Copia <strong>Project URL</strong> y <strong>anon key</strong> en{" "}
-                <code className="rounded bg-black/40 px-1.5 py-0.5">.env.local</code>.
-              </li>
-              <li>
-                Ejecuta el SQL de <code className="rounded bg-black/40 px-1.5 py-0.5">supabase/migrations/</code> en
-                el SQL Editor y crea un usuario en Authentication → Users.
-              </li>
-              <li>Reinicia el servidor.</li>
-            </ol>
-          </div>
+        <FormularioLogin desde={desde} />
+
+        {local && (
+          <p className="mt-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs leading-relaxed text-slate-400">
+            <span className="font-semibold text-marca-400">Modo local</span> · usuario{" "}
+            <code className="rounded bg-black/40 px-1 py-0.5">admin</code> y contraseña{" "}
+            <code className="rounded bg-black/40 px-1 py-0.5">admin</code>. Cuando añadas las
+            credenciales de Supabase en <code className="rounded bg-black/40 px-1 py-0.5">.env.local</code>{" "}
+            y reinicies, el equipo entrará con su propia cuenta (ver README).
+          </p>
         )}
 
         <p className="mt-8 text-center text-xs text-slate-500">

@@ -1,16 +1,26 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { isSupabaseConfigured, supabaseUrl, supabaseAnonKey } from "./env";
+import { isSupabaseConfigured, esModoLocal, supabaseUrl, supabaseAnonKey } from "./env";
+import { COOKIE_SESION, verificarToken } from "@/lib/local/sesion";
 
 /**
- * Refresca la sesión de Supabase en cada petición (rotación de cookies)
- * y devuelve el usuario junto con la respuesta propagada.
+ * Refresca la sesión en cada petición y devuelve el usuario junto con la
+ * respuesta propagada.
+ *
+ * - Modo local: verifica la cookie firmada (HMAC) sin tocar la base de datos.
+ * - Modo Supabase: rota las cookies de GoTrue.
  *
  * Usado desde `src/proxy.ts`.
  */
 export async function updateSession(request: NextRequest) {
   // La respuesta que seguimos y en la que escribimos las cookies rotadas.
   const response = NextResponse.next({ request });
+
+  if (esModoLocal()) {
+    const token = request.cookies.get(COOKIE_SESION)?.value;
+    const userId = token ? await verificarToken(token) : null;
+    return { request, response, user: userId ? { id: userId } : null, configurado: true };
+  }
 
   if (!isSupabaseConfigured()) {
     return { request, response, user: null, configurado: false };
