@@ -1,36 +1,79 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Go Fun · Gestión
 
-## Getting Started
+Aplicación privada de gestión para **Go Fun Eventos** (Almagro, Ciudad Real):
+calendario de eventos y gestión económica del negocio de alquiler de hinchables.
 
-First, run the development server:
+- **Stack**: Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind CSS v4 + Supabase.
+- **Datos**: Supabase (Postgres) con seguridad RLS para el equipo autenticado.
+- **Renderizado**: páginas dinámicas del lado del servidor (sesión obligatoria en todo el panel).
+
+## Puesta en marcha
+
+### 1. Crear el proyecto de Supabase
+
+1. Crea un proyecto gratuito en [supabase.com](https://supabase.com/dashboard).
+2. Copia **Project URL** y **anon key** desde *Project Settings → API*.
+3. Rellena `.env.local` (copia desde `.env.example`):
+
+   ```bash
+   cp .env.example .env.local
+   # y edita .env.local con tus credenciales reales
+   ```
+
+4. Ejecuta `supabase/migrations/20261008120000_init.sql` en el **SQL Editor**
+   de Supabase. Crea las tablas, activa RLS, inserta el catálogo real de la web
+   y los packs.
+5. Crea un usuario del equipo en **Authentication → Users → Add user**.
+
+Hasta que existan credenciales reales, la app muestra una pantalla de
+configuración en `/login`.
+
+### 2. Instalar y arrancar
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Abre [http://localhost:3000](http://localhost:3000). El `proxy` redirige
+cualquier ruta privada sin sesión a `/login`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Estructura
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+supabase/migrations/        # SQL inicial (esquema + RLS + semilla)
+src/
+  proxy.ts                  # Protección de rutas y refresco de sesión (Next 16)
+  lib/
+    types.ts                # Tipos de dominio
+    constantes.ts           # Estados de evento, zonas, duraciones, catálogo
+    data.ts                 # Consultas (Server Components)
+    format.ts               # Formato de fechas, horas y euros
+    supabase/               # Clientes de Supabase (server/client/proxy)
+    actions/                # Server Actions (escriben en la BD)
+  components/               # Shell, calendario, formularios, UI
+  app/
+    login/                  # Acceso del equipo
+    (app)/                  # Panel, calendario, eventos, clientes, catálogo, configuración
+```
 
-## Learn More
+## Funcionalidad por fases
 
-To learn more about Next.js, take a look at the following resources:
+- **F0 — Base**: proyecto, Supabase, login, shell y navegación.
+- **F1 — Catálogo y eventos** ✅:
+  - Calendario mensual por URL (`?mes=YYYY-MM`), con estado, dirección y horario de montaje.
+  - Eventos con líneas (atracción × cantidad × precio), auto-precio según tarifa
+    y suplementos de duración (5 h / 8 h) configurables en Ajustes.
+  - Clientes (particulares y empresas; IRPF por cliente) y catálogo de atracciones/packs.
+- **F2 — Tesorería** (pendiente): caja y banco, cobros y gastos.
+- **F3 — Facturación** (pendiente): facturas con IVA 21 % / IRPF 15 % e informes fiscales.
+- **F4 — Pulido** (pendiente): exportaciones, PWA.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Decisiones de fiscalidad
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Empresa S.L./S.A. → **IVA 21 %**, sin retención propia al emitir.
+- **IRPF 15 %** se aplica solo cuando el cliente es empresa o administración
+  (ajustable por cliente en `retiene_irpf`).
+- Los importes de los suplementos (25 € / 5 h, 55 € / 8 h) y la serie de facturas
+  (`F`) son configurables en **Ajustes**; conviene que tu gestor valide los
+  valores por defecto.

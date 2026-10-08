@@ -1,0 +1,167 @@
+import type {
+  CategoriaAtraccion,
+  DuracionEvento,
+  EstadoEvento,
+  TipoCliente,
+  TipoEvento,
+  ZonaEvento,
+} from "./types";
+
+// ------------------------------------------------------------
+// Estados del evento
+// ------------------------------------------------------------
+export const ESTADOS: Record<
+  EstadoEvento,
+  { label: string; chip: string; punto: string; texto: string }
+> = {
+  borrador: {
+    label: "Borrador",
+    chip: "bg-slate-100 text-slate-700 ring-slate-200",
+    punto: "bg-slate-400",
+    texto: "text-slate-600",
+  },
+  confirmado: {
+    label: "Confirmado",
+    chip: "bg-lime-100 text-lime-800 ring-lime-200",
+    punto: "bg-lime-500",
+    texto: "text-lime-700",
+  },
+  realizado: {
+    label: "Realizado",
+    chip: "bg-sky-100 text-sky-800 ring-sky-200",
+    punto: "bg-sky-500",
+    texto: "text-sky-700",
+  },
+  cobrado: {
+    label: "Cobrado",
+    chip: "bg-emerald-100 text-emerald-800 ring-emerald-200",
+    punto: "bg-emerald-500",
+    texto: "text-emerald-700",
+  },
+  cancelado: {
+    label: "Cancelado",
+    chip: "bg-rose-100 text-rose-800 ring-rose-200",
+    punto: "bg-rose-500",
+    texto: "text-rose-600",
+  },
+};
+
+export const ORDEN_ESTADOS: EstadoEvento[] = [
+  "borrador",
+  "confirmado",
+  "realizado",
+  "cobrado",
+  "cancelado",
+];
+
+// ------------------------------------------------------------
+// Tipos de evento
+// ------------------------------------------------------------
+export const TIPOS_EVENTO: TipoEvento[] = [
+  "particular",
+  "cumpleaños",
+  "comunión",
+  "boda",
+  "verbena",
+  "ayuntamiento",
+  "colegio",
+  "empresa",
+  "otro",
+];
+
+// ------------------------------------------------------------
+// Categorías del catálogo (mismos filtros que la web pública)
+// ------------------------------------------------------------
+export const CATEGORIAS: { valor: CategoriaAtraccion; label: string }[] = [
+  { valor: "infantil", label: "Infantil" },
+  { valor: "verano", label: "Verano" },
+  { valor: "deportes", label: "Deportes" },
+  { valor: "adultos", label: "Adultos" },
+  { valor: "servicios", label: "Servicios" },
+];
+
+export function labelCategoria(c: CategoriaAtraccion): string {
+  return CATEGORIAS.find((x) => x.valor === c)?.label ?? c;
+}
+
+// ------------------------------------------------------------
+// Zonas de cobertura (coinciden con la calculadora de la web)
+// ------------------------------------------------------------
+export const ZONAS: { valor: ZonaEvento; label: string; detalle: string }[] = [
+  {
+    valor: "almagro_30km",
+    label: "Almagro y 30 km",
+    detalle: "Transporte y montaje incluidos en el precio",
+  },
+  {
+    valor: "provincia_cr",
+    label: "Provincia de Ciudad Real",
+    detalle: "Transporte y montaje incluidos",
+  },
+  {
+    valor: "clm",
+    label: "Resto de Castilla-La Mancha",
+    detalle: "Puede aplicarse suplemento por distancia",
+  },
+];
+
+export function labelZona(z: ZonaEvento): string {
+  return ZONAS.find((x) => x.valor === z)?.label ?? z;
+}
+
+// ------------------------------------------------------------
+// Duración y suplementos
+// ------------------------------------------------------------
+export const DURACIONES: DuracionEvento[] = ["3-4 h", "5 h", "8 h"];
+
+// ------------------------------------------------------------
+// Tipos de cliente (define si retiene IRPF)
+// ------------------------------------------------------------
+export const TIPOS_CLIENTE: {
+  valor: TipoCliente;
+  label: string;
+  retiene: boolean;
+  ayuda: string;
+}[] = [
+  {
+    valor: "particular",
+    label: "Particular",
+    retiene: false,
+    ayuda: "No retiene IRPF. Cobras el 100% de la factura.",
+  },
+  {
+    valor: "empresa",
+    label: "Empresa (S.L./S.A./Autónomo)",
+    retiene: true,
+    ayuda: "Retiene el 15% de IRPF. Cobras el 85%.",
+  },
+  {
+    valor: "administracion",
+    label: "Administración pública",
+    retiene: true,
+    ayuda: "Retiene IRPF. Factura con importe bruto.",
+  },
+];
+
+export function labelTipoCliente(t: TipoCliente): string {
+  return TIPOS_CLIENTE.find((x) => x.valor === t)?.label ?? t;
+}
+
+// ------------------------------------------------------------
+// Provincias de Castilla-La Mancha
+// ------------------------------------------------------------
+export const PROVINCIAS_CLM = [
+  "Ciudad Real",
+  "Toledo",
+  "Albacete",
+  "Cuenca",
+  "Guadalajara",
+] as const;
+
+// ------------------------------------------------------------
+// Importes orientativos publicados en la web (combos de referencia)
+// ------------------------------------------------------------
+export const EJEMPLOS_COMBOS = [
+  "Toro + Castillo = 450 €",
+  "Castillo + Futbolín = 275 €",
+];
