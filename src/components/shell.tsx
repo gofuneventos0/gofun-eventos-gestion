@@ -12,6 +12,7 @@ import {
   PartyPopper,
   Settings,
   Users,
+  Wallet,
   X,
 } from "lucide-react";
 import { salirSesion } from "@/lib/actions/auth";
@@ -20,6 +21,7 @@ const NAV = [
   { href: "/panel", label: "Panel", icon: LayoutDashboard },
   { href: "/calendario", label: "Calendario", icon: CalendarDays },
   { href: "/eventos", label: "Eventos", icon: PartyPopper },
+  { href: "/tesoreria", label: "Tesorería", icon: Wallet },
   { href: "/clientes", label: "Clientes", icon: Users },
   { href: "/catalogo", label: "Catálogo", icon: Package },
   { href: "/configuracion", label: "Configuración", icon: Settings },

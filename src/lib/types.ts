@@ -108,6 +108,89 @@ export interface EventoLinea {
   orden: number;
 }
 
+// ------------------------------------------------------------
+// Tesorería (Fase 2): cuentas, cobros y gastos
+// ------------------------------------------------------------
+export type TipoCuenta = "caja" | "banco";
+
+export type MetodoPago = "efectivo" | "transferencia" | "tarjeta" | "bizum";
+
+export type CategoriaGasto =
+  | "combustible"
+  | "reparaciones"
+  | "material"
+  | "publicidad"
+  | "impuestos"
+  | "personal"
+  | "otros";
+
+export interface Cuenta {
+  id: string;
+  nombre: string;
+  tipo: TipoCuenta;
+  saldo_inicial: number;
+  activa: boolean;
+  creado_en: string;
+}
+
+export interface Cobro {
+  id: string;
+  cuenta_id: string;
+  evento_id: string | null;
+  cliente_id: string | null;
+  concepto: string;
+  fecha: string; // 'YYYY-MM-DD'
+  importe: number;
+  metodo: MetodoPago;
+  notas: string | null;
+  creado_en: string;
+}
+
+export interface Gasto {
+  id: string;
+  cuenta_id: string;
+  categoria: CategoriaGasto;
+  concepto: string;
+  fecha: string;
+  importe: number;
+  proveedor: string | null;
+  metodo: MetodoPago;
+  factura_ref: string | null;
+  notas: string | null;
+  creado_en: string;
+}
+
+/** Fila unificada del libro de tesorería (cobro o gasto). */
+export interface Movimiento {
+  id: string;
+  tipo: "cobro" | "gasto";
+  fecha: string;
+  concepto: string;
+  cuenta_nombre: string;
+  importe: number; // siempre positivo
+  evento_id: string | null;
+  evento_titulo: string | null;
+  cliente_nombre: string | null;
+  categoria: CategoriaGasto | null;
+  metodo: MetodoPago;
+  referencia: string | null; // factura del gasto
+}
+
+/** Saldo de una cuenta: histórico completo + entradas/salidas del período. */
+export interface SaldoCuenta {
+  cuenta: Cuenta;
+  ingresosPeriodo: number;
+  gastosPeriodo: number;
+  saldoTotal: number; // saldo_inicial + todos los cobros − todos los gastos
+}
+
+export interface ResumenTesoreria {
+  cuentas: SaldoCuenta[];
+  movimientos: Movimiento[];
+  totalIngresos: number;
+  totalGastos: number;
+}
+
 export interface EmpresaConfig {
   id: number;
   nombre: string;

@@ -1,8 +1,11 @@
 import type {
   CategoriaAtraccion,
+  CategoriaGasto,
   DuracionEvento,
   EstadoEvento,
+  MetodoPago,
   TipoCliente,
+  TipoCuenta,
   TipoEvento,
   ZonaEvento,
 } from "./types";
@@ -165,3 +168,40 @@ export const EJEMPLOS_COMBOS = [
   "Toro + Castillo = 450 €",
   "Castillo + Futbolín = 275 €",
 ];
+
+// ------------------------------------------------------------
+// Tesorería: métodos de pago y categorías de gasto
+// ------------------------------------------------------------
+export const METODOS_PAGO: { valor: MetodoPago; label: string }[] = [
+  { valor: "efectivo", label: "Efectivo" },
+  { valor: "transferencia", label: "Transferencia" },
+  { valor: "tarjeta", label: "Tarjeta" },
+  { valor: "bizum", label: "Bizum" },
+];
+
+export function labelMetodo(m: MetodoPago): string {
+  return METODOS_PAGO.find((x) => x.valor === m)?.label ?? m;
+}
+
+export const CATEGORIAS_GASTO: { valor: CategoriaGasto; label: string }[] = [
+  { valor: "combustible", label: "Combustible" },
+  { valor: "reparaciones", label: "Reparaciones" },
+  { valor: "material", label: "Material" },
+  { valor: "publicidad", label: "Publicidad" },
+  { valor: "impuestos", label: "Impuestos" },
+  { valor: "personal", label: "Personal" },
+  { valor: "otros", label: "Otros" },
+];
+
+export function labelCategoriaGasto(c: CategoriaGasto): string {
+  return CATEGORIAS_GASTO.find((x) => x.valor === c)?.label ?? c;
+}
+
+export const TIPOS_CUENTA: { valor: TipoCuenta; label: string }[] = [
+  { valor: "caja", label: "Caja" },
+  { valor: "banco", label: "Banco" },
+];
+
+export function labelTipoCuenta(t: TipoCuenta): string {
+  return TIPOS_CUENTA.find((x) => x.valor === t)?.label ?? t;
+}

@@ -2,10 +2,16 @@ import { createClient } from "@/lib/supabase/server";
 import type {
   Atraccion,
   Cliente,
+  Cobro,
+  Cuenta,
   EmpresaConfig,
   EstadoEvento,
   EventoCompleto,
+  Gasto,
+  Movimiento,
   Pack,
+  ResumenTesoreria,
+  SaldoCuenta,
 } from "@/lib/types";
 
 const CAMPOS_EVENTO =
@@ -172,4 +178,155 @@ export async function getConteoEstados(
 
   for (const fila of data ?? []) acc[fila.estado as EstadoEvento]++;
   return acc;
+}
+
+// ------------------------------------------------------------
+// Tesorería
+// ------------------------------------------------------------
+export async function getCuentas(): Promise<Cuenta[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("cuentas")
+    .select("*")
+    .eq("activa", true)
+    .order("tipo", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data as Cuenta[]) ?? [];
+}
+
+/** Relación embebida de supabase: puede llegar como objeto o como array de 1. */
+type RelRow = Record<string, unknown>;
+
+function nombreRelacion(v: unknown): string | null {
+  if (Array.isArray(v)) {
+    const n = (v[0] as { nombre?: unknown } | undefined)?.nombre;
+    return typeof n === "string" ? n : null;
+  }
+  if (v && typeof v === "object") {
+    const n = (v as { nombre?: unknown }).nombre;
+    return typeof n === "string" ? n : null;
+  }
+  return null;
+}
+
+function sumarPorCuenta(arr: unknown): Record<string, number> {
+  const totales: Record<string, number> = {};
+  const filas = (arr as RelRow[] | null) ?? [];
+  for (const r of filas) {
+    const key = String(r.cuenta_id ?? "");
+    if (!key) continue;
+    totales[key] = (totales[key] ?? 0) + Number(r.importe ?? 0);
+  }
+  return totales;
+}
+
+function mapearCobro(c: RelRow): Movimiento {
+  return {
+    id: String(c.id),
+    tipo: "cobro",
+    fecha: String(c.fecha),
+    concepto: String(c.concepto),
+    cuenta_nombre: nombreRelacion(c.cuenta) ?? "—",
+    importe: Number(c.importe),
+    evento_id: c.evento_id ? String(c.evento_id) : null,
+    evento_titulo: nombreRelacion(c.evento),
+    cliente_nombre: nombreRelacion(c.cliente),
+    categoria: null,
+    metodo: c.metodo as Movimiento["metodo"],
+    referencia: null,
+  };
+}
+
+export async function getResumenTesoreria(
+  desde: string,
+  hasta: string
+): Promise<ResumenTesoreria> {
+  const supabase = await createClient();
+
+  const [cuentasR, cobrosR, gastosR, cobrosTotR, gastosTotR] = await Promise.all([
+    supabase.from("cuentas").select("*").eq("activa", true).order("tipo", { ascending: true }),
+    supabase
+      .from("cobros")
+      .select("id, fecha, concepto, importe, metodo, cuenta_id, cuenta:cuentas(nombre), evento:eventos(titulo), cliente:clientes(nombre)")
+      .gte("fecha", desde)
+      .lte("fecha", hasta),
+    supabase
+      .from("gastos")
+      .select("id, fecha, concepto, importe, metodo, cuenta_id, categoria, factura_ref, cuenta:cuentas(nombre)")
+      .gte("fecha", desde)
+      .lte("fecha", hasta),
+    supabase.from("cobros").select("cuenta_id, importe"),
+    supabase.from("gastos").select("cuenta_id, importe"),
+  ]);
+
+  for (const r of [cuentasR, cobrosR, gastosR, cobrosTotR, gastosTotR])
+    if (r.error) throw new Error(r.error.message);
+
+  const cuentas = (cuentasR.data as unknown as Cuenta[]) ?? [];
+  const cobros = (cobrosR.data as unknown as RelRow[]) ?? [];
+  const gastos = (gastosR.data as unknown as RelRow[]) ?? [];
+
+  const cp = sumarPorCuenta(cobrosR.data);
+  const gp = sumarPorCuenta(gastosR.data);
+  const ct = sumarPorCuenta(cobrosTotR.data);
+  const gt = sumarPorCuenta(gastosTotR.data);
+
+  const resumen: SaldoCuenta[] = cuentas.map((cuenta) => ({
+    cuenta,
+    ingresosPeriodo: cp[cuenta.id] ?? 0,
+    gastosPeriodo: gp[cuenta.id] ?? 0,
+    saldoTotal: cuenta.saldo_inicial + (ct[cuenta.id] ?? 0) - (gt[cuenta.id] ?? 0),
+  }));
+
+  const movimientos: Movimiento[] = [
+    ...cobros.map(mapearCobro),
+    ...gastos.map((g) => ({
+      id: String(g.id),
+      tipo: "gasto" as const,
+      fecha: String(g.fecha),
+      concepto: String(g.concepto),
+      cuenta_nombre: nombreRelacion(g.cuenta) ?? "—",
+      importe: Number(g.importe),
+      evento_id: null,
+      evento_titulo: null,
+      cliente_nombre: null,
+      categoria: (g.categoria as Movimiento["categoria"]) ?? "otros",
+      metodo: g.metodo as Movimiento["metodo"],
+      referencia: g.factura_ref ? String(g.factura_ref) : null,
+    })),
+  ].sort((a, b) => (a.fecha === b.fecha ? 0 : a.fecha < b.fecha ? 1 : -1));
+
+  return {
+    cuentas: resumen,
+    movimientos,
+    totalIngresos: movimientos.filter((m) => m.tipo === "cobro").reduce((s, m) => s + m.importe, 0),
+    totalGastos: movimientos.filter((m) => m.tipo === "gasto").reduce((s, m) => s + m.importe, 0),
+  };
+}
+
+/** Cobros registrados contra un evento (para calcular cobrado/pendiente). */
+export async function getCobrosEvento(eventoId: string): Promise<Movimiento[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("cobros")
+    .select("id, fecha, concepto, importe, metodo, evento_id, cuenta:cuentas(nombre), evento:eventos(titulo), cliente:clientes(nombre)")
+    .eq("evento_id", eventoId)
+    .order("fecha", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return ((data as unknown as RelRow[]) ?? []).map(mapearCobro);
+}
+
+export async function getCobro(id: string): Promise<Cobro | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("cobros").select("*").eq("id", id).maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as Cobro) ?? null;
+}
+
+export async function getGasto(id: string): Promise<Gasto | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("gastos").select("*").eq("id", id).maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as Gasto) ?? null;
 }

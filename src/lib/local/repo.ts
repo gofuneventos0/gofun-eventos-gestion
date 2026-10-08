@@ -4,12 +4,18 @@ import { db } from "./db";
 import type {
   Atraccion,
   Cliente,
+  Cobro,
+  Cuenta,
   EmpresaConfig,
   EstadoEvento,
   Evento,
   EventoCompleto,
   EventoLinea,
+  Gasto,
+  Movimiento,
   Pack,
+  ResumenTesoreria,
+  SaldoCuenta,
 } from "@/lib/types";
 
 // ------------------------------------------------------------
@@ -515,4 +521,276 @@ export function guardarConfiguracion(fila: FilaConfig): void {
     fila.telefono, fila.email, fila.iban, fila.iva_defecto, fila.irpf_defecto,
     fila.serie_facturas, fila.suplemento_5h, fila.suplemento_8h, new Date().toISOString()
   );
+}
+
+// ------------------------------------------------------------
+// Tesorería
+// ------------------------------------------------------------
+function aCuenta(f: Fila): Cuenta {
+  return {
+    id: String(f.id),
+    nombre: String(f.nombre),
+    tipo: f.tipo as Cuenta["tipo"],
+    saldo_inicial: Number(f.saldo_inicial),
+    activa: bool(f.activa as number),
+    creado_en: String(f.creado_en),
+  };
+}
+
+const COLUMNAS_COBRO =
+  `c.id, c.fecha, c.concepto, c.importe, c.metodo, c.evento_id, c.cliente_id,
+   cu.nombre as cuenta_nombre, e.titulo as evento_titulo, cl.nombre as cliente_nombre,
+   null as categoria, null as referencia`;
+
+const COLUMNAS_GASTO =
+  `g.id, g.fecha, g.concepto, g.importe, g.metodo, g.factura_ref as referencia,
+   cu.nombre as cuenta_nombre, null as evento_id, null as cliente_id,
+   null as evento_titulo, null as cliente_nombre, g.categoria`;
+
+const aCobroRow = (f: Fila): Movimiento => ({
+  id: String(f.id),
+  tipo: "cobro",
+  fecha: String(f.fecha),
+  concepto: String(f.concepto),
+  cuenta_nombre: (f.cuenta_nombre as string) ?? "—",
+  importe: Number(f.importe),
+  evento_id: f.evento_id ? String(f.evento_id) : null,
+  evento_titulo: (f.evento_titulo as string) ?? null,
+  cliente_nombre: (f.cliente_nombre as string) ?? null,
+  categoria: null,
+  metodo: f.metodo as Movimiento["metodo"],
+  referencia: null,
+});
+
+const aGastoRow = (f: Fila): Movimiento => ({
+  id: String(f.id),
+  tipo: "gasto",
+  fecha: String(f.fecha),
+  concepto: String(f.concepto),
+  cuenta_nombre: (f.cuenta_nombre as string) ?? "—",
+  importe: Number(f.importe),
+  evento_id: null,
+  evento_titulo: null,
+  cliente_nombre: null,
+  categoria: (f.categoria as Movimiento["categoria"]) ?? "otros",
+  metodo: f.metodo as Movimiento["metodo"],
+  referencia: (f.referencia as string) ?? null,
+});
+
+export function getCuentas(): Cuenta[] {
+  const filas = db
+    .prepare("select * from cuentas where activa = 1 order by tipo asc, nombre asc")
+    .all() as Fila[];
+  return filas.map(aCuenta);
+}
+
+/** Saldo histórico total por cuenta y entradas/salidas del período. */
+export function getResumenTesoreria(desde: string, hasta: string): ResumenTesoreria {
+  const cuentas = getCuentas();
+
+  const cobrosPeriodo = db
+    .prepare(
+      `select cuenta_id, coalesce(sum(importe), 0) as s from cobros
+       where fecha between ? and ? group by cuenta_id`
+    )
+    .all(desde, hasta) as Array<{ cuenta_id: string; s: number }>;
+  const gastosPeriodo = db
+    .prepare(
+      `select cuenta_id, coalesce(sum(importe), 0) as s from gastos
+       where fecha between ? and ? group by cuenta_id`
+    )
+    .all(desde, hasta) as Array<{ cuenta_id: string; s: number }>;
+
+  const cobrosTotal = db
+    .prepare(`select cuenta_id, coalesce(sum(importe), 0) as s from cobros group by cuenta_id`)
+    .all() as Array<{ cuenta_id: string; s: number }>;
+  const gastosTotal = db
+    .prepare(`select cuenta_id, coalesce(sum(importe), 0) as s from gastos group by cuenta_id`)
+    .all() as Array<{ cuenta_id: string; s: number }>;
+
+  const sumar = (arr: Array<{ cuenta_id: string; s: number }>) => arr.reduce((m, r) => {
+    m[r.cuenta_id] = Number(r.s);
+    return m;
+  }, {} as Record<string, number>);
+
+  const cp = sumar(cobrosPeriodo);
+  const gp = sumar(gastosPeriodo);
+  const ct = sumar(cobrosTotal);
+  const gt = sumar(gastosTotal);
+
+  const resumen: SaldoCuenta[] = cuentas.map((cuenta) => ({
+    cuenta,
+    ingresosPeriodo: cp[cuenta.id] ?? 0,
+    gastosPeriodo: gp[cuenta.id] ?? 0,
+    saldoTotal: cuenta.saldo_inicial + (ct[cuenta.id] ?? 0) - (gt[cuenta.id] ?? 0),
+  }));
+
+  const filasCobros = db
+    .prepare(
+      `select ${COLUMNAS_COBRO}
+       from cobros c
+       left join cuentas cu on cu.id = c.cuenta_id
+       left join eventos e on e.id = c.evento_id
+       left join clientes cl on cl.id = c.cliente_id
+       where c.fecha between ? and ?`
+    )
+    .all(desde, hasta) as Fila[];
+  const filasGastos = db
+    .prepare(
+      `select ${COLUMNAS_GASTO}
+       from gastos g
+       left join cuentas cu on cu.id = g.cuenta_id
+       where g.fecha between ? and ?`
+    )
+    .all(desde, hasta) as Fila[];
+
+  const movimientos: Movimiento[] = [
+    ...filasCobros.map(aCobroRow),
+    ...filasGastos.map(aGastoRow),
+  ].sort((a, b) => (a.fecha === b.fecha ? a.id.localeCompare(b.id) : a.fecha < b.fecha ? 1 : -1));
+
+  return {
+    cuentas: resumen,
+    movimientos,
+    totalIngresos: movimientos.filter((m) => m.tipo === "cobro").reduce((s, m) => s + m.importe, 0),
+    totalGastos: movimientos.filter((m) => m.tipo === "gasto").reduce((s, m) => s + m.importe, 0),
+  };
+}
+
+/** Cobros registrados contra un evento (para calcular cobrado/pendiente). */
+export function getCobrosEvento(eventoId: string): Movimiento[] {
+  const filas = db
+    .prepare(
+      `select ${COLUMNAS_COBRO}
+       from cobros c
+       left join cuentas cu on cu.id = c.cuenta_id
+       left join eventos e on e.id = c.evento_id
+       left join clientes cl on cl.id = c.cliente_id
+       where c.evento_id = ?
+       order by c.fecha desc`
+    )
+    .all(eventoId) as Fila[];
+  return filas.map(aCobroRow);
+}
+
+export interface FilaCobro {
+  id?: string | null;
+  cuenta_id: string;
+  evento_id: string | null;
+  cliente_id: string | null;
+  concepto: string;
+  fecha: string;
+  importe: number;
+  metodo: string;
+  notas: string | null;
+}
+
+export function guardarCobro(fila: FilaCobro, id?: string | null): void {
+  const ahora = new Date().toISOString();
+  if (id) {
+    db.prepare(
+      `update cobros set
+         cuenta_id = ?, evento_id = ?, cliente_id = ?, concepto = ?, fecha = ?,
+         importe = ?, metodo = ?, notas = ?
+       where id = ?`
+    ).run(
+      fila.cuenta_id, fila.evento_id, fila.cliente_id, fila.concepto, fila.fecha,
+      fila.importe, fila.metodo, fila.notas, id
+    );
+  } else {
+    db.prepare(
+      `insert into cobros
+         (id, cuenta_id, evento_id, cliente_id, concepto, fecha, importe, metodo, notas, creado_en)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      randomUUID(), fila.cuenta_id, fila.evento_id, fila.cliente_id, fila.concepto,
+      fila.fecha, fila.importe, fila.metodo, fila.notas, ahora
+    );
+  }
+}
+
+export function borrarCobro(id: string): void {
+  db.prepare("delete from cobros where id = ?").run(id);
+}
+
+export interface FilaGasto {
+  id?: string | null;
+  cuenta_id: string;
+  categoria: string;
+  concepto: string;
+  fecha: string;
+  importe: number;
+  proveedor: string | null;
+  metodo: string;
+  factura_ref: string | null;
+  notas: string | null;
+}
+
+export function guardarGasto(fila: FilaGasto, id?: string | null): void {
+  const ahora = new Date().toISOString();
+  if (id) {
+    db.prepare(
+      `update gastos set
+         cuenta_id = ?, categoria = ?, concepto = ?, fecha = ?, importe = ?,
+         proveedor = ?, metodo = ?, factura_ref = ?, notas = ?
+       where id = ?`
+    ).run(
+      fila.cuenta_id, fila.categoria, fila.concepto, fila.fecha, fila.importe,
+      fila.proveedor, fila.metodo, fila.factura_ref, fila.notas, id
+    );
+  } else {
+    db.prepare(
+      `insert into gastos
+         (id, cuenta_id, categoria, concepto, fecha, importe, proveedor, metodo, factura_ref, notas, creado_en)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      randomUUID(), fila.cuenta_id, fila.categoria, fila.concepto, fila.fecha,
+      fila.importe, fila.proveedor, fila.metodo, fila.factura_ref, fila.notas, ahora
+    );
+  }
+}
+
+function aCobro(f: Fila): Cobro {
+  return {
+    id: String(f.id),
+    cuenta_id: String(f.cuenta_id),
+    evento_id: f.evento_id ? String(f.evento_id) : null,
+    cliente_id: f.cliente_id ? String(f.cliente_id) : null,
+    concepto: String(f.concepto),
+    fecha: String(f.fecha),
+    importe: Number(f.importe),
+    metodo: f.metodo as Cobro["metodo"],
+    notas: f.notas ? String(f.notas) : null,
+    creado_en: String(f.creado_en),
+  };
+}
+
+function aGasto(f: Fila): Gasto {
+  return {
+    id: String(f.id),
+    cuenta_id: String(f.cuenta_id),
+    categoria: f.categoria as Gasto["categoria"],
+    concepto: String(f.concepto),
+    fecha: String(f.fecha),
+    importe: Number(f.importe),
+    proveedor: f.proveedor ? String(f.proveedor) : null,
+    metodo: f.metodo as Gasto["metodo"],
+    factura_ref: f.factura_ref ? String(f.factura_ref) : null,
+    notas: f.notas ? String(f.notas) : null,
+    creado_en: String(f.creado_en),
+  };
+}
+
+export function getCobro(id: string): Cobro | null {
+  const f = db.prepare("select * from cobros where id = ?").get(id) as Fila | undefined;
+  return f ? aCobro(f) : null;
+}
+
+export function getGasto(id: string): Gasto | null {
+  const f = db.prepare("select * from gastos where id = ?").get(id) as Fila | undefined;
+  return f ? aGasto(f) : null;
+}
+
+export function borrarGasto(id: string): void {
+  db.prepare("delete from gastos where id = ?").run(id);
 }

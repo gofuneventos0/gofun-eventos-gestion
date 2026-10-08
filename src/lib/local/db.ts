@@ -161,6 +161,49 @@ create table if not exists usuarios (
   nombre            text    not null,
   creado_en         text    not null
 );
+
+create table if not exists cuentas (
+  id                text primary key,
+  nombre            text    not null,
+  tipo              text    not null default 'caja' check (tipo in ('caja','banco')),
+  saldo_inicial     real    not null default 0,
+  activa            integer not null default 1,
+  creado_en         text    not null
+);
+
+create table if not exists cobros (
+  id                text primary key,
+  cuenta_id         text not null references cuentas (id),
+  evento_id         text references eventos (id) on delete set null,
+  cliente_id        text references clientes (id) on delete set null,
+  concepto          text    not null,
+  fecha             text    not null,
+  importe           real    not null check (importe > 0),
+  metodo            text    not null default 'efectivo' check (metodo in ('efectivo','transferencia','tarjeta','bizum')),
+  notas             text,
+  creado_en         text    not null
+);
+
+create index if not exists cobros_fecha_idx on cobros (fecha desc);
+create index if not exists cobros_evento_idx on cobros (evento_id);
+create index if not exists cobros_cuenta_idx on cobros (cuenta_id);
+
+create table if not exists gastos (
+  id                text primary key,
+  cuenta_id         text not null references cuentas (id),
+  categoria         text    not null default 'otros' check (categoria in ('combustible','reparaciones','material','publicidad','impuestos','personal','otros')),
+  concepto          text    not null,
+  fecha             text    not null,
+  importe           real    not null check (importe > 0),
+  proveedor         text,
+  metodo            text    not null default 'efectivo' check (metodo in ('efectivo','transferencia','tarjeta','bizum')),
+  factura_ref       text,
+  notas             text,
+  creado_en         text    not null
+);
+
+create index if not exists gastos_fecha_idx on gastos (fecha desc);
+create index if not exists gastos_cuenta_idx on gastos (cuenta_id);
 `;
 
 // ------------------------------------------------------------
@@ -227,6 +270,16 @@ function sembrar(d: DatabaseSync) {
     d.prepare(
       `insert into usuarios (id, email, password_hash, nombre, creado_en) values (?, ?, ?, ?, ?)`
     ).run(randomUUID(), "admin", hashPassword("admin"), "Administración", ahora());
+  }
+
+  // Cuentas de tesorería por defecto
+  const hayCuentas = d.prepare("select 1 from cuentas limit 1").get();
+  if (!hayCuentas) {
+    const insCuenta = d.prepare(
+      `insert into cuentas (id, nombre, tipo, saldo_inicial, activa, creado_en) values (?, ?, ?, ?, 1, ?)`
+    );
+    insCuenta.run(randomUUID(), "Caja", "caja", 0, ahora());
+    insCuenta.run(randomUUID(), "Banco", "banco", 0, ahora());
   }
 }
 

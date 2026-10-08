@@ -88,7 +88,14 @@ src/
   - Eventos con líneas (atracción × cantidad × precio), auto-precio según tarifa
     y suplementos de duración (5 h / 8 h) configurables en Ajustes.
   - Clientes (particulares y empresas; IRPF por cliente) y catálogo de atracciones/packs.
-- **F2 — Tesorería** (pendiente): caja y banco, cobros y gastos.
+- **F2 — Tesorería** ✅:
+  - Cuentas por defecto (Caja y Banco) con saldo inicial y saldo actual.
+  - **Cobros** (señales, pagos a cuenta, pago completo) enlazables a un evento:
+    el detalle del evento muestra **cobrado / pendiente** y un acceso directo
+    a «Registrar cobro».
+  - **Gastos** con categoría, proveedor, método de pago y nº de factura.
+  - Libro mensual de movimientos (`?mes=YYYY-MM`) con totales de ingresos, gastos
+    y neto del mes, edición y borrado de cada movimiento.
 - **F3 — Facturación** (pendiente): facturas con IVA 21 % / IRPF 15 % e informes fiscales.
 - **F4 — Pulido** (pendiente): exportaciones, PWA.
 

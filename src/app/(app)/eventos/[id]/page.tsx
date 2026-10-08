@@ -1,8 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Mail, MapPin, Pencil, Phone, User } from "lucide-react";
-import { getEvento } from "@/lib/data";
-import { euros, fechaLarga, hora } from "@/lib/format";
+import {
+  ArrowLeft,
+  HandCoins,
+  Mail,
+  MapPin,
+  Pencil,
+  Phone,
+  User,
+} from "lucide-react";
+import { getCobrosEvento, getEvento } from "@/lib/data";
+import { euros, fechaCorta, fechaLarga, hora } from "@/lib/format";
 import { labelTipoCliente, labelZona } from "@/lib/constantes";
 import { CLASE_BOTON_SUAVE, EtiquetaEstado, Tarjeta } from "@/components/ui";
 import AccionesEvento from "@/components/acciones-evento";
@@ -27,6 +35,13 @@ export default async function EventoPage(props: PageProps<"/eventos/[id]">) {
     .slice()
     .sort((a, b) => a.orden - b.orden)
     .reduce((s, l) => s + l.cantidad * Number(l.precio_unitario), 0);
+
+  const importeRef = Number(evento.importe_total) > 0 ? Number(evento.importe_total) : totalLineas;
+
+  const cobros = await getCobrosEvento(id);
+  const cobrado = cobros.reduce((s, c) => s + c.importe, 0);
+  const pendiente = Math.max(0, importeRef - cobrado);
+  const pctCobrado = importeRef > 0 ? Math.min(100, Math.round((cobrado / importeRef) * 100)) : 0;
 
   return (
     <>
@@ -191,6 +206,63 @@ export default async function EventoPage(props: PageProps<"/eventos/[id]">) {
           </Tarjeta>
 
           <AccionesEvento id={evento.id} estado={evento.estado} />
+
+          {/* Cobros */}
+          <Tarjeta className="p-5">
+            <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-tinta-600">
+              Cobros del evento
+            </h2>
+            <div className="flex items-baseline justify-between">
+              <span className="text-sm text-tinta-600">Total</span>
+              <span className="text-lg font-extrabold text-tinta-950">{euros(importeRef)}</span>
+            </div>
+            <div className="mt-1 flex items-baseline justify-between">
+              <span className="text-sm text-tinta-600">Cobrado</span>
+              <span className="text-sm font-bold text-emerald-700">{euros(cobrado)}</span>
+            </div>
+            <div className="mt-1 flex items-baseline justify-between">
+              <span className="text-sm text-tinta-600">Pendiente</span>
+              <span
+                className={`text-sm font-bold ${
+                  pendiente > 0 ? "text-amber-700" : "text-emerald-700"
+                }`}
+              >
+                {euros(pendiente)}
+              </span>
+            </div>
+
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-100">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  pendiente > 0 ? "bg-marca-500" : "bg-emerald-500"
+                }`}
+                style={{ width: `${pctCobrado}%` }}
+              />
+            </div>
+            <p className="mt-1 text-right text-xs text-tinta-600">{pctCobrado}% cobrado</p>
+
+            <Link
+              href={`/tesoreria?accion=cobro&evento=${evento.id}`}
+              className={`${CLASE_BOTON_SUAVE} mt-3 w-full`}
+            >
+              <HandCoins className="h-4 w-4" /> Registrar cobro
+            </Link>
+
+            {cobros.length > 0 && (
+              <ul className="mt-3 space-y-1.5 border-t border-gray-100 pt-3">
+                {cobros.map((c) => (
+                  <li key={c.id} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="min-w-0 truncate text-tinta-600">
+                      {fechaCorta(c.fecha)} · {c.concepto}
+                    </span>
+                    <span className="shrink-0 font-semibold text-emerald-700">
+                      {euros(c.importe)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Tarjeta>
         </div>
       </div>
     </>
