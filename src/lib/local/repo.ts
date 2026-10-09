@@ -4,6 +4,7 @@ import { db } from "./db";
 import { IRPF_RETENCION_DEFECTO, siguienteNumeroFactura } from "@/lib/constantes";
 import type {
   Atraccion,
+  BienInversion,
   Cliente,
   Cobro,
   Cuenta,
@@ -20,6 +21,7 @@ import type {
   Pack,
   ResumenTesoreria,
   SaldoCuenta,
+  TipoBienInversion,
 } from "@/lib/types";
 
 // ------------------------------------------------------------
@@ -973,4 +975,86 @@ export function crearFacturaDesdeEvento(nueva: NuevaFactura): { id: string } {
 
 export function cambiarEstadoFactura(id: string, estado: string): void {
   db.prepare("update facturas set estado = ? where id = ?").run(estado, id);
+}
+
+// ------------------------------------------------------------
+// Amortizaciones (Fase 4.2): bienes de inversión
+// ------------------------------------------------------------
+
+function aBien(f: Fila): BienInversion {
+  return {
+    id: String(f.id),
+    descripcion: String(f.descripcion),
+    numero_factura: (f.numero_factura as string) ?? null,
+    fecha_adquisicion: String(f.fecha_adquisicion),
+    valor_sin_iva: Number(f.valor_sin_iva),
+    tipo_iva: Number(f.tipo_iva),
+    iva_importe: Number(f.iva_importe),
+    tipo_bien: f.tipo_bien as TipoBienInversion,
+    porcentaje_max: Number(f.porcentaje_max),
+    observaciones: (f.observaciones as string) ?? null,
+    creado_en: String(f.creado_en),
+    actualizado_en: String(f.actualizado_en),
+  };
+}
+
+export function getBienesInversion(): BienInversion[] {
+  const filas = db
+    .prepare("select * from bienes_inversion order by fecha_adquisicion desc, creado_en desc")
+    .all() as Fila[];
+  return filas.map(aBien);
+}
+
+export function getBienInversion(id: string): BienInversion | null {
+  const f = db
+    .prepare("select * from bienes_inversion where id = ?")
+    .get(id) as Fila | undefined;
+  return f ? aBien(f) : null;
+}
+
+export interface NuevoBienInversion {
+  descripcion: string;
+  numero_factura: string | null;
+  fecha_adquisicion: string;
+  valor_sin_iva: number;
+  tipo_iva: number;
+  iva_importe: number;
+  tipo_bien: TipoBienInversion;
+  porcentaje_max: number;
+  observaciones: string | null;
+}
+
+export function crearBienInversion(nuevo: NuevoBienInversion): { id: string } {
+  const id = randomUUID();
+  const ahora = new Date().toISOString();
+  db.prepare(
+    `insert into bienes_inversion
+       (id, descripcion, numero_factura, fecha_adquisicion, valor_sin_iva, tipo_iva,
+        iva_importe, tipo_bien, porcentaje_max, observaciones, creado_en, actualizado_en)
+     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id, nuevo.descripcion, nuevo.numero_factura, nuevo.fecha_adquisicion,
+    nuevo.valor_sin_iva, nuevo.tipo_iva, nuevo.iva_importe, nuevo.tipo_bien,
+    nuevo.porcentaje_max, nuevo.observaciones, ahora, ahora
+  );
+  return { id };
+}
+
+export function actualizarBienInversion(id: string, cambios: NuevoBienInversion): void {
+  db.prepare(
+    `update bienes_inversion set
+       descripcion = ?, numero_factura = ?, fecha_adquisicion = ?, valor_sin_iva = ?,
+       tipo_iva = ?, iva_importe = ?, tipo_bien = ?, porcentaje_max = ?, observaciones = ?,
+       actualizado_en = ?
+     where id = ?`
+  ).run(
+    cambios.descripcion, cambios.numero_factura, cambios.fecha_adquisicion,
+    cambios.valor_sin_iva, cambios.tipo_iva, cambios.iva_importe, cambios.tipo_bien,
+    cambios.porcentaje_max, cambios.observaciones,
+    new Date().toISOString(), id
+  );
+}
+
+export function borrarBienInversion(id: string): void {
+  db.prepare("delete from bienes_inversion where id = ?").run(id);
 }

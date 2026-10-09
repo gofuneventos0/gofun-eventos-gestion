@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { IRPF_RETENCION_DEFECTO, siguienteNumeroFactura } from "@/lib/constantes";
 import type {
   Atraccion,
+  BienInversion,
   Cliente,
   Cobro,
   Cuenta,
@@ -14,6 +15,7 @@ import type {
   Pack,
   ResumenTesoreria,
   SaldoCuenta,
+  TipoBienInversion,
 } from "@/lib/types";
 
 const CAMPOS_EVENTO =
@@ -497,5 +499,95 @@ export async function crearFacturaDesdeEvento(nueva: {
 export async function cambiarEstadoFactura(id: string, estado: string): Promise<void> {
   const supabase = await createClient();
   const { error } = await supabase.from("facturas").update({ estado }).eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+// ------------------------------------------------------------
+// Amortizaciones (Fase 4.2): bienes de inversión
+// ------------------------------------------------------------
+
+const CAMPOS_BIEN = "id, descripcion, numero_factura, fecha_adquisicion, valor_sin_iva, tipo_iva, iva_importe, tipo_bien, porcentaje_max, observaciones, creado_en, actualizado_en";
+
+function aBien(f: Record<string, unknown>): BienInversion {
+  return {
+    id: String(f.id),
+    descripcion: String(f.descripcion),
+    numero_factura: f.numero_factura == null ? null : String(f.numero_factura),
+    fecha_adquisicion: String(f.fecha_adquisicion),
+    valor_sin_iva: Number(f.valor_sin_iva),
+    tipo_iva: Number(f.tipo_iva),
+    iva_importe: Number(f.iva_importe),
+    tipo_bien: f.tipo_bien as TipoBienInversion,
+    porcentaje_max: Number(f.porcentaje_max),
+    observaciones: f.observaciones == null ? null : String(f.observaciones),
+    creado_en: String(f.creado_en),
+    actualizado_en: String(f.actualizado_en),
+  };
+}
+
+export async function getBienesInversion(): Promise<BienInversion[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("bienes_inversion")
+    .select(CAMPOS_BIEN)
+    .order("fecha_adquisicion", { ascending: false });
+  if (error) throw new Error(error.message);
+  return ((data as unknown as Record<string, unknown>[]) ?? []).map(aBien);
+}
+
+export async function getBienInversion(id: string): Promise<BienInversion | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("bienes_inversion")
+    .select(CAMPOS_BIEN)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? aBien(data as Record<string, unknown>) : null;
+}
+
+export async function crearBienInversion(nuevo: {
+  descripcion: string;
+  numero_factura: string | null;
+  fecha_adquisicion: string;
+  valor_sin_iva: number;
+  tipo_iva: number;
+  iva_importe: number;
+  tipo_bien: TipoBienInversion;
+  porcentaje_max: number;
+  observaciones: string | null;
+}): Promise<{ id: string }> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("bienes_inversion")
+    .insert(nuevo)
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+  return { id: data?.id as string };
+}
+
+export async function actualizarBienInversion(
+  id: string,
+  cambios: {
+    descripcion: string;
+    numero_factura: string | null;
+    fecha_adquisicion: string;
+    valor_sin_iva: number;
+    tipo_iva: number;
+    iva_importe: number;
+    tipo_bien: TipoBienInversion;
+    porcentaje_max: number;
+    observaciones: string | null;
+  }
+): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("bienes_inversion").update(cambios).eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function borrarBienInversion(id: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("bienes_inversion").delete().eq("id", id);
   if (error) throw new Error(error.message);
 }

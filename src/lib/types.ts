@@ -266,3 +266,58 @@ export interface FacturaCompleta extends Factura {
   evento: Pick<Evento, "id" | "titulo" | "fecha"> | null;
   factura_lineas: FacturaLinea[];
 }
+
+// ------------------------------------------------------------
+// Amortizaciones (Fase 4.2): bienes de inversión y tablas de amortización
+// ------------------------------------------------------------
+export type TipoBienInversion =
+  | "instalaciones"
+  | "maquinaria"
+  | "equipos_informaticos"
+  | "utiles_herramientas"
+  | "edificios"
+  | "transporte"
+  | "ganado_vacuno"
+  | "frutales_citricos"
+  | "ganado_equino"
+  | "olivar";
+
+export interface BienInversion {
+  id: string;
+  /** Descripción según el concepto de la factura de compra. */
+  descripcion: string;
+  numero_factura: string | null;
+  /** 'YYYY-MM-DD' */
+  fecha_adquisicion: string;
+  /** Valor de adquisición sin IVA (base amortizable). */
+  valor_sin_iva: number;
+  /** Tipo de IVA aplicado en la compra: 21, 10 o 4. */
+  tipo_iva: number;
+  iva_importe: number;
+  tipo_bien: TipoBienInversion;
+  /** Porcentaje lineal máximo anual según el tipo de bien (tablas de Hacienda). */
+  porcentaje_max: number;
+  observaciones: string | null;
+  creado_en: string;
+  actualizado_en: string;
+}
+
+/** Fila anual de la tabla de amortización. */
+export interface FilaAmortizacion {
+  anio: number;
+  /** Porcentaje aplicado ese año (0 si es el último ajustado). */
+  porcentaje: number;
+  amortiza: number;
+  acumulado: number;
+  pendiente: number;
+}
+
+export interface TablaAmortizacion {
+  dias_restantes: number;
+  filas: FilaAmortizacion[];
+}
+
+export interface AnioAmortizacion {
+  anio: number;
+  amortiza: number;
+}

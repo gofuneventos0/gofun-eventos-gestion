@@ -5,6 +5,7 @@ import { getConfig, getFactura } from "@/lib/data";
 import { ESTADOS_FACTURA, labelTipoCliente } from "@/lib/constantes";
 import { euros, fechaLarga, fechaNumerica } from "@/lib/format";
 import AccionesFactura from "@/components/factura-acciones";
+import BotonExportarPdf from "@/components/boton-exportar-pdf";
 
 export const metadata = { title: "Factura" };
 
@@ -189,7 +190,17 @@ export default async function FacturaPage(props: PageProps<"/facturacion/[id]">)
         </div>
 
         {/* Acciones (no aparecen al imprimir) */}
-        <div className="w-full shrink-0 lg:w-72 print:hidden">
+        <div className="w-full shrink-0 space-y-4 lg:w-72 print:hidden">
+          <div className="tarjeta p-5">
+            <h2 className="mb-1 text-sm font-bold uppercase tracking-wide text-tinta-600">
+              Exportar PDF
+            </h2>
+            <p className="mb-4 text-xs text-tinta-600">
+              Descarga la {esAnulada ? "factura" : factura.estado === "proforma" ? "proforma" : "factura"}{" "}
+              en el formato oficial de Go Fun Eventos.
+            </p>
+            <BotonExportarPdf factura={factura} config={config} />
+          </div>
           <AccionesFactura id={factura.id} estado={factura.estado} />
         </div>
       </div>

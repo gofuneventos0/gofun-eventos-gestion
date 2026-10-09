@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   CalendarDays,
+  Calculator,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -23,6 +24,7 @@ const NAV = [
   { href: "/calendario", label: "Calendario", icon: CalendarDays },
   { href: "/eventos", label: "Eventos", icon: PartyPopper },
   { href: "/facturacion", label: "Facturación", icon: Receipt },
+  { href: "/amortizaciones", label: "Amortizaciones", icon: Calculator },
   { href: "/tesoreria", label: "Tesorería", icon: Wallet },
   { href: "/clientes", label: "Clientes", icon: Users },
   { href: "/catalogo", label: "Catálogo", icon: Package },

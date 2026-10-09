@@ -5,6 +5,7 @@ import type {
   EstadoEvento,
   EstadoFactura,
   MetodoPago,
+  TipoBienInversion,
   TipoCliente,
   TipoCuenta,
   TipoEvento,
@@ -256,4 +257,36 @@ export function siguienteNumeroFactura(
     return Number.isFinite(v) ? Math.max(m, v) : m;
   }, 0);
   return `${base}${String(max + 1).padStart(4, "0")}`;
+}
+
+// ------------------------------------------------------------
+// Amortizaciones (Fase 4.2): tipos de bien de inversión y su
+// porcentaje lineal máximo anual según las tablas oficiales.
+// ------------------------------------------------------------
+export const TIPOS_BIEN_INVERSION: {
+  valor: TipoBienInversion;
+  label: string;
+  porcentaje: number;
+}[] = [
+  { valor: "instalaciones", label: "Instalaciones, mobiliario, enseres y resto de inmovilizado material", porcentaje: 10 },
+  { valor: "maquinaria", label: "Maquinaria", porcentaje: 12 },
+  { valor: "equipos_informaticos", label: "Equipos informáticos y programas informáticos", porcentaje: 26 },
+  { valor: "utiles_herramientas", label: "Útiles y herramientas", porcentaje: 30 },
+  { valor: "edificios", label: "Edificios y otras construcciones", porcentaje: 3 },
+  { valor: "transporte", label: "Elementos de transporte", porcentaje: 16 },
+  { valor: "ganado_vacuno", label: "Ganado vacuno, porcino, ovino y caprino", porcentaje: 16 },
+  { valor: "frutales_citricos", label: "Frutales cítricos y viñedos", porcentaje: 4 },
+  { valor: "ganado_equino", label: "Ganado equino y frutas no cítricos", porcentaje: 8 },
+  { valor: "olivar", label: "Olivar", porcentaje: 2 },
+];
+
+/** Tipos de IVA aplicables a la adquisición de bienes de inversión. */
+export const TIPOS_IVA_BIEN: number[] = [21, 10, 4];
+
+export function labelTipoBien(t: TipoBienInversion): string {
+  return TIPOS_BIEN_INVERSION.find((x) => x.valor === t)?.label ?? t;
+}
+
+export function porcentajeTipoBien(t: TipoBienInversion): number {
+  return TIPOS_BIEN_INVERSION.find((x) => x.valor === t)?.porcentaje ?? 10;
 }

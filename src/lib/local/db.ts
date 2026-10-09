@@ -237,6 +237,23 @@ create table if not exists factura_lineas (
 );
 
 create index if not exists factura_lineas_factura_idx on factura_lineas (factura_id);
+
+create table if not exists bienes_inversion (
+  id                text primary key,
+  descripcion       text    not null,
+  numero_factura    text,
+  fecha_adquisicion text    not null,
+  valor_sin_iva     real    not null default 0,
+  tipo_iva          real    not null default 21,
+  iva_importe       real    not null default 0,
+  tipo_bien         text    not null default 'instalaciones',
+  porcentaje_max    real    not null default 10,
+  observaciones     text,
+  creado_en         text    not null,
+  actualizado_en    text    not null
+);
+
+create index if not exists bienes_inversion_fecha_idx on bienes_inversion (fecha_adquisicion desc);
 `;
 
 // ------------------------------------------------------------

@@ -31,3 +31,7 @@ export const getGasto = impl.getGasto;
 export const getFacturas = impl.getFacturas;
 export const getFactura = impl.getFactura;
 export const getFacturaEvento = impl.getFacturaEvento;
+
+// Amortizaciones (Fase 4.2) — solo lecturas; las mutaciones van por Server Actions
+export const getBienesInversion = impl.getBienesInversion;
+export const getBienInversion = impl.getBienInversion;
