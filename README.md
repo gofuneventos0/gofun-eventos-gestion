@@ -80,7 +80,22 @@ modo local queda solo para desarrollo.
    - `NEXT_PUBLIC_SUPABASE_URL` · `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    
    Al desplegar, la app detecta las credenciales y pasa automáticamente a modo
-   Supabase (las `NEXT_PUBLIC_*` se inyectan en el build).
+   Supabase (las `NEXT_PUBLIC_*` se inyectan en el build; si cambian, hay que
+   lanzar un rebuild en *Deploys → Trigger deploy*).
+
+### Repos desplegados
+
+El sitio de Netlify apunta al repo espejo **`gofuneventos0/gofun-eventos-gestion`**
+(no al principal). Para que cada `git push` llegue a los dos a la vez, `origin`
+tiene dos URLs de push (config ya aplicada en este equipo):
+
+```bash
+git remote set-url --add --push origin https://github.com/gofuneventos0/contabilidadycalendario.git
+git remote set-url --add --push origin https://github.com/gofuneventos0/gofun-eventos-gestion.git
+```
+
+Con eso, `git push origin <rama>` sube a ambos repos y Netlify redespliega al
+instante (rama `development`).
 
 ## Estructura
 
