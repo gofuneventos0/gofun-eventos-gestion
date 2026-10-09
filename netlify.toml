@@ -1,0 +1,14 @@
+# Despliegue en Netlify (Next.js 16).
+# Netlify detecta Next.js automáticamente y usa su runtime (OpenNext);
+# estos valores coinciden con los que Netlify auto-configura y sirven
+# también para desplegar con `netlify deploy` desde la CLI.
+[build]
+command = "npm run build"
+publish = ".next"
+
+# La app exige sesión: sin credenciales de Supabase arranca en "modo local"
+# con SQLite, que NO es persistente en Netlify. Para producción hay que fijar
+# estas variables (Site → Configuration → Environment variables):
+#   NEXT_PUBLIC_SUPABASE_URL  (Project Settings → API → Project URL)
+#   NEXT_PUBLIC_SUPABASE_ANON_KEY
+# y ejecutar supabase/migrations/*.sql en el SQL Editor del proyecto.

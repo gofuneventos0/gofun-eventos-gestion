@@ -62,6 +62,26 @@ npm run dev
 Abre [http://localhost:3000](http://localhost:3000). El `proxy` redirige
 cualquier ruta privada sin sesión a `/login`.
 
+## Despliegue en Netlify
+
+La app está preparada para Netlify (Next.js 16 con su runtime; `netlify.toml`
+y `.nvmrc` incluidos). Importante: en un serverless la base **SQLite local no es
+persistente**, así que en producción la app usa **Supabase** (Opción B) y el
+modo local queda solo para desarrollo.
+
+1. **Supabase**: crea el proyecto, ejecuta `supabase/migrations/*.sql` en el SQL
+   Editor (en orden: `20261008120000_init.sql` → `20261008120001_tesoreria.sql`
+   → `20261008130000_facturacion.sql`) y crea los usuarios del equipo en
+   *Authentication → Users*.
+2. **Conecta el repo en Netlify** (*Add new site → Import an existing project*).
+   Netlify detecta Next.js automáticamente (`npm run build` y `.next`) y respeta
+   `.nvmrc` (Node 24).
+3. **Variables de entorno** en *Site → Configuration → Environment variables*:
+   - `NEXT_PUBLIC_SUPABASE_URL` · `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   
+   Al desplegar, la app detecta las credenciales y pasa automáticamente a modo
+   Supabase (las `NEXT_PUBLIC_*` se inyectan en el build).
+
 ## Estructura
 
 ```
