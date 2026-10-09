@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { es } from "date-fns/locale";
 import { format } from "date-fns";
-import { HandCoins, Landmark, PlusCircle, Wallet } from "lucide-react";
+import { Download, HandCoins, Landmark, PlusCircle, Wallet } from "lucide-react";
 import {
   getCobro,
   getCuentas,
@@ -115,7 +115,16 @@ export default async function TesoreriaPage(props: PageProps<"/tesoreria">) {
             Ver mes
           </button>
         </form>
-        <p className="text-sm font-medium capitalize text-tinta-600">{etiquetaMes}</p>
+        <div className="flex items-center gap-3">
+          <Link
+            href={`/api/exportar/tesoreria?mes=${mesRaw}`}
+            className={CLASE_BOTON_SUAVE}
+            title="Descargar este mes en CSV"
+          >
+            <Download className="h-4 w-4" /> CSV
+          </Link>
+          <p className="text-sm font-medium capitalize text-tinta-600">{etiquetaMes}</p>
+        </div>
       </div>
 
       {/* Resumen de cuentas */}

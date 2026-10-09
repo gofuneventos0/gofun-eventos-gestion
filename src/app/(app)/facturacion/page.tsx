@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FileText, PlusCircle } from "lucide-react";
+import { Download, FileText, PlusCircle } from "lucide-react";
 import { getFacturas } from "@/lib/data";
 import { ESTADOS_FACTURA } from "@/lib/constantes";
 import { euros, fechaCorta } from "@/lib/format";
@@ -119,7 +119,16 @@ export default async function FacturacionPage(props: PageProps<"/facturacion">) 
             Ver período
           </button>
         </form>
-        <p className="text-sm font-medium capitalize text-tinta-600">{etiquetaPeriodo}</p>
+        <div className="flex items-center gap-3">
+          <Link
+            href={`/api/exportar/facturas?periodo=${anio}&trimestre=${trimestre}`}
+            className={CLASE_BOTON_SUAVE}
+            title="Descargar informe fiscal en CSV"
+          >
+            <Download className="h-4 w-4" /> Exportar informe
+          </Link>
+          <p className="text-sm font-medium capitalize text-tinta-600">{etiquetaPeriodo}</p>
+        </div>
       </div>
 
       {/* Informe del período */}

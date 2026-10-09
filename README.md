@@ -106,7 +106,11 @@ src/
   - Vista imprimible de la factura con los datos fiscales de la empresa y del cliente,
     e **informe fiscal** por trimestre o año (base imponible, cuota IVA, retención
     IRPF y total), contando solo las facturas emitidas.
-- **F4 — Pulido** (pendiente): exportaciones, PWA.
+- **F4 — Pulido** (en curso):
+  - **Exportaciones CSV** ✅ (F4.1): libro de tesorería por mes, eventos y clientes
+    desde sus listados, e informe fiscal por trimestre/año desde Facturación.
+    Archivos compatibles con Excel/LibreOffice (`;`, decimales con coma, UTF-8).
+  - **PWA** (pendiente): instalable y con caché offline.
 
 ## Decisiones de fiscalidad
 

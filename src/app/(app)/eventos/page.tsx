@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { CalendarPlus, Search } from "lucide-react";
+import { CalendarPlus, Download, Search } from "lucide-react";
 import { getEventos } from "@/lib/data";
 import { euros, fechaCorta, hora } from "@/lib/format";
 import { ESTADOS, ORDEN_ESTADOS, labelZona } from "@/lib/constantes";
 import type { EstadoEvento } from "@/lib/types";
 import {
   CLASE_BOTON_MARCA,
+  CLASE_BOTON_SUAVE,
   CLASE_INPUT,
   EncabezadoPagina,
   EtiquetaEstado,
@@ -46,9 +47,18 @@ export default async function EventosPage(props: PageProps<"/eventos">) {
         titulo="Eventos"
         descripcion={`${filtrados.length} evento(s) · ${euros(totalFiltrado)} contratados`}
         acciones={
-          <Link href="/eventos/nuevo" className={CLASE_BOTON_MARCA}>
-            <CalendarPlus className="h-4 w-4" /> Nuevo evento
-          </Link>
+          <>
+            <Link
+              href={`/api/exportar/eventos${estado ? `?estado=${estado}` : ""}${q ? `${estado ? "&" : "?"}q=${encodeURIComponent(q)}` : ""}`}
+              className={CLASE_BOTON_SUAVE}
+              title="Descargar en CSV"
+            >
+              <Download className="h-4 w-4" /> Exportar CSV
+            </Link>
+            <Link href="/eventos/nuevo" className={CLASE_BOTON_MARCA}>
+              <CalendarPlus className="h-4 w-4" /> Nuevo evento
+            </Link>
+          </>
         }
       />
 

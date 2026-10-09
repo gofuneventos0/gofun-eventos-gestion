@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { Plus, Search, UserPlus, Users } from "lucide-react";
+import { Download, Plus, Search, UserPlus, Users } from "lucide-react";
 import { getCliente, getClientes } from "@/lib/data";
 import { iniciales } from "@/lib/format";
 import { labelTipoCliente } from "@/lib/constantes";
 import ClienteForm from "@/components/cliente-form";
-import { CLASE_BOTON_MARCA, CLASE_INPUT, EncabezadoPagina, Vacio } from "@/components/ui";
+import { CLASE_BOTON_MARCA, CLASE_BOTON_SUAVE, CLASE_INPUT, EncabezadoPagina, Vacio } from "@/components/ui";
 
 export const metadata = { title: "Clientes" };
 
@@ -39,9 +39,18 @@ export default async function ClientesPage(props: PageProps<"/clientes">) {
         titulo="Clientes"
         descripcion={`${clientes.length} contacto(s) en cartera`}
         acciones={
-          <Link href="/clientes?nuevo=1" className={CLASE_BOTON_MARCA}>
-            <UserPlus className="h-4 w-4" /> Nuevo cliente
-          </Link>
+          <>
+            <Link
+              href={`/api/exportar/clientes${q ? `?q=${encodeURIComponent(q)}` : ""}`}
+              className={CLASE_BOTON_SUAVE}
+              title="Descargar cartera en CSV"
+            >
+              <Download className="h-4 w-4" /> Exportar CSV
+            </Link>
+            <Link href="/clientes?nuevo=1" className={CLASE_BOTON_MARCA}>
+              <UserPlus className="h-4 w-4" /> Nuevo cliente
+            </Link>
+          </>
         }
       />
 
