@@ -83,19 +83,13 @@ modo local queda solo para desarrollo.
    Supabase (las `NEXT_PUBLIC_*` se inyectan en el build; si cambian, hay que
    lanzar un rebuild en *Deploys → Trigger deploy*).
 
-### Repos desplegados
+### Repo y despliegue automático
 
-El sitio de Netlify apunta al repo espejo **`gofuneventos0/gofun-eventos-gestion`**
-(no al principal). Para que cada `git push` llegue a los dos a la vez, `origin`
-tiene dos URLs de push (config ya aplicada en este equipo):
-
-```bash
-git remote set-url --add --push origin https://github.com/gofuneventos0/contabilidadycalendario.git
-git remote set-url --add --push origin https://github.com/gofuneventos0/gofun-eventos-gestion.git
-```
-
-Con eso, `git push origin <rama>` sube a ambos repos y Netlify redespliega al
-instante (rama `development`).
+El repo se renombró en GitHub de `contabilidadycalendario` a
+**`gofuneventos0/gofun-eventos-gestion`** (la URL antigua redirige automáticamente).
+El sitio de Netlify está conectado a este mismo repo y despliega la rama
+`development`. No hay que hacer nada especial: cada `git push origin development`
+sube el código y Netlify **redespliega solo**.
 
 ## Estructura
 
