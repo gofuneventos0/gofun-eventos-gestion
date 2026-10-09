@@ -43,9 +43,10 @@ Supabase automáticamente sin tocar código.
    # y edita .env.local con tus credenciales reales
    ```
 
-4. Ejecuta `supabase/migrations/20261008120000_init.sql` en el **SQL Editor**
-   de Supabase. Crea las tablas, activa RLS, inserta el catálogo real de la web
-   y los packs.
+4. Ejecuta las migraciones de `supabase/migrations/` en el **SQL Editor**
+   de Supabase, en orden (`20261008120000_init.sql` → `20261008120001_tesoreria.sql`
+   → `20261008130000_facturacion.sql`). Crean las tablas, activan RLS e insertan el
+   catálogo real de la web y los packs.
 5. Crea un usuario del equipo en **Authentication → Users → Add user**.
 
 Hasta que existan credenciales reales, la app muestra una pantalla de
@@ -77,8 +78,8 @@ src/
   components/               # Shell, calendario, formularios, UI
   app/
     login/                  # Acceso del equipo
-    (app)/                  # Panel, calendario, eventos, clientes, catálogo, configuración
-```
+    (app)/                  # Panel, calendario, eventos, tesorería, facturación…
+    ```
 
 ## Funcionalidad por fases
 
@@ -96,7 +97,15 @@ src/
   - **Gastos** con categoría, proveedor, método de pago y nº de factura.
   - Libro mensual de movimientos (`?mes=YYYY-MM`) con totales de ingresos, gastos
     y neto del mes, edición y borrado de cada movimiento.
-- **F3 — Facturación** (pendiente): facturas con IVA 21 % / IRPF 15 % e informes fiscales.
+- **F3 — Facturación** ✅:
+  - Generación de facturas desde los eventos con **numeración correlativa por serie**
+    (`F2026-0001`, serie configurable en Ajustes).
+  - **IVA 21 %** siempre y retención de **IRPF 15 %** solo cuando el cliente es
+    empresa o administración (total = base + IVA − IRPF). Estados *proforma*,
+    *emitida* y *anulada* (el número anulado no se reutiliza).
+  - Vista imprimible de la factura con los datos fiscales de la empresa y del cliente,
+    e **informe fiscal** por trimestre o año (base imponible, cuota IVA, retención
+    IRPF y total), contando solo las facturas emitidas.
 - **F4 — Pulido** (pendiente): exportaciones, PWA.
 
 ## Decisiones de fiscalidad

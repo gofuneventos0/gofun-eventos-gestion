@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { IRPF_RETENCION_DEFECTO, siguienteNumeroFactura } from "@/lib/constantes";
 import type {
   Atraccion,
   Cliente,
@@ -7,6 +8,7 @@ import type {
   EmpresaConfig,
   EstadoEvento,
   EventoCompleto,
+  FacturaCompleta,
   Gasto,
   Movimiento,
   Pack,
@@ -329,4 +331,171 @@ export async function getGasto(id: string): Promise<Gasto | null> {
   const { data, error } = await supabase.from("gastos").select("*").eq("id", id).maybeSingle();
   if (error) throw new Error(error.message);
   return (data as Gasto) ?? null;
+}
+
+// ------------------------------------------------------------
+// Facturación (Fase 3)
+// ------------------------------------------------------------
+const CAMPOS_FACTURA =
+  "*, cliente:clientes(id,nombre,tipo,cif_nif,direccion,poblacion,provincia,cp,retiene_irpf), evento:eventos(id,titulo,fecha), factura_lineas(*)";
+
+function aFacturaCompleta(f: Record<string, unknown>): FacturaCompleta {
+  return {
+    id: String(f.id),
+    numero: String(f.numero),
+    serie: String(f.serie),
+    fecha: String(f.fecha),
+    cliente_id: f.cliente_id ? String(f.cliente_id) : null,
+    evento_id: f.evento_id ? String(f.evento_id) : null,
+    estado: f.estado as FacturaCompleta["estado"],
+    base_imponible: Number(f.base_imponible),
+    iva: Number(f.iva),
+    iva_importe: Number(f.iva_importe),
+    irpf: Number(f.irpf),
+    irpf_importe: Number(f.irpf_importe),
+    total: Number(f.total),
+    notas: (f.notas as string) ?? null,
+    creado_en: String(f.creado_en),
+    cliente: (f.cliente as FacturaCompleta["cliente"]) ?? null,
+    evento: (f.evento as FacturaCompleta["evento"]) ?? null,
+    factura_lineas: ((f.factura_lineas as unknown[]) ?? []).map((l) => ({
+      id: String((l as Record<string, unknown>).id),
+      factura_id: String((l as Record<string, unknown>).factura_id),
+      descripcion: String((l as Record<string, unknown>).descripcion),
+      cantidad: Number((l as Record<string, unknown>).cantidad),
+      precio_unitario: Number((l as Record<string, unknown>).precio_unitario),
+      orden: Number((l as Record<string, unknown>).orden),
+    })),
+  };
+}
+
+export async function getFacturas(desde: string, hasta: string): Promise<FacturaCompleta[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("facturas")
+    .select(CAMPOS_FACTURA)
+    .gte("fecha", desde)
+    .lte("fecha", hasta)
+    .order("fecha", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return ((data as unknown as Record<string, unknown>[]) ?? []).map(aFacturaCompleta);
+}
+
+export async function getFactura(id: string): Promise<FacturaCompleta | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("facturas")
+    .select(CAMPOS_FACTURA)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  return data ? aFacturaCompleta(data as Record<string, unknown>) : null;
+}
+
+/** Factura activa (no anulada) vinculada a un evento, si existe. */
+export async function getFacturaEvento(eventoId: string): Promise<FacturaCompleta | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("facturas")
+    .select(CAMPOS_FACTURA)
+    .eq("evento_id", eventoId)
+    .neq("estado", "anulada")
+    .order("fecha", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  return data ? aFacturaCompleta(data as Record<string, unknown>) : null;
+}
+
+export async function crearFacturaDesdeEvento(nueva: {
+  evento_id: string;
+  fecha: string;
+  estado: string;
+  serie: string;
+  iva: number;
+  irpf: number;
+}): Promise<{ id: string }> {
+  const supabase = await createClient();
+
+  const { data: evento, error: errE } = await supabase
+    .from("eventos")
+    .select("cliente_id")
+    .eq("id", nueva.evento_id)
+    .maybeSingle();
+  if (errE) throw new Error(errE.message);
+  if (!evento) throw new Error("No se encontró el evento.");
+  const clienteId = evento.cliente_id as string | null;
+  if (!clienteId) throw new Error("El evento no tiene cliente asignado.");
+
+  const [clienteR, lineasR, numerosR] = await Promise.all([
+    supabase.from("clientes").select("id, retiene_irpf").eq("id", clienteId).maybeSingle(),
+    supabase
+      .from("evento_lineas")
+      .select("descripcion, cantidad, precio_unitario")
+      .eq("evento_id", nueva.evento_id)
+      .order("orden", { ascending: true }),
+    supabase.from("facturas").select("numero").eq("serie", nueva.serie),
+  ]);
+  for (const r of [clienteR, lineasR, numerosR]) if (r.error) throw new Error(r.error.message);
+
+  const cliente = clienteR.data as { id: string; retiene_irpf: boolean } | null;
+  if (!cliente) throw new Error("El evento no tiene cliente asignado.");
+
+  const lineas = (lineasR.data as Array<{ descripcion: string; cantidad: number; precio_unitario: number }>) ?? [];
+  const base = lineas.reduce((s, l) => s + Number(l.cantidad) * Number(l.precio_unitario), 0);
+  if (base <= 0) throw new Error("El evento no tiene importes para facturar.");
+
+  const numeros = ((numerosR.data as Array<{ numero: string }>) ?? []).map((r) => r.numero);
+  const anio = Number(String(nueva.fecha).slice(0, 4)) || new Date().getFullYear();
+  const numero = siguienteNumeroFactura(numeros, nueva.serie, anio);
+
+  const retiene = Boolean(cliente.retiene_irpf);
+  const irpfTasa = retiene ? (nueva.irpf > 0 ? nueva.irpf : IRPF_RETENCION_DEFECTO) : 0;
+  const ivaImporte = Number(((base * nueva.iva) / 100).toFixed(2));
+  const irpfImporte = Number(((base * irpfTasa) / 100).toFixed(2));
+  const total = Number((base + ivaImporte - irpfImporte).toFixed(2));
+
+  const { data: factura, error } = await supabase
+    .from("facturas")
+    .insert({
+      numero,
+      serie: nueva.serie,
+      fecha: nueva.fecha,
+      cliente_id: clienteId,
+      evento_id: nueva.evento_id,
+      estado: nueva.estado,
+      base_imponible: base,
+      iva: nueva.iva,
+      iva_importe: ivaImporte,
+      irpf: irpfTasa,
+      irpf_importe: irpfImporte,
+      total,
+    })
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+
+  if (lineas.length) {
+    const { error: errL } = await supabase.from("factura_lineas").insert(
+      lineas.map((l, i) => ({
+        factura_id: factura.id,
+        descripcion: l.descripcion,
+        cantidad: l.cantidad,
+        precio_unitario: l.precio_unitario,
+        orden: i,
+      }))
+    );
+    if (errL) throw new Error(errL.message);
+  }
+
+  return { id: factura.id as string };
+}
+
+export async function cambiarEstadoFactura(id: string, estado: string): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("facturas").update({ estado }).eq("id", id);
+  if (error) throw new Error(error.message);
 }

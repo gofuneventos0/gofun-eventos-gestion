@@ -216,3 +216,53 @@ export interface EventoCompleto extends Evento {
   cliente: Pick<Cliente, "id" | "nombre" | "tipo" | "retiene_irpf" | "telefono"> | null;
   evento_lineas: EventoLinea[];
 }
+
+// ------------------------------------------------------------
+// Facturación (Fase 3): facturas e informes fiscales
+// ------------------------------------------------------------
+export type EstadoFactura = "proforma" | "emitida" | "anulada";
+
+export interface Factura {
+  id: string;
+  numero: string;
+  serie: string;
+  fecha: string; // 'YYYY-MM-DD'
+  cliente_id: string | null;
+  evento_id: string | null;
+  estado: EstadoFactura;
+  base_imponible: number;
+  iva: number; // tipo o porcentaje aplicado
+  iva_importe: number;
+  irpf: number; // porcentaje de retención aplicado (0 si el cliente no retiene)
+  irpf_importe: number;
+  total: number; // base + iva − irpf
+  notas: string | null;
+  creado_en: string;
+}
+
+export interface FacturaLinea {
+  id: string;
+  factura_id: string;
+  descripcion: string;
+  cantidad: number;
+  precio_unitario: number;
+  orden: number;
+}
+
+/** Factura con cliente y evento resueltos (incluye datos fiscales del cliente). */
+export interface FacturaCompleta extends Factura {
+  cliente: Pick<
+    Cliente,
+    | "id"
+    | "nombre"
+    | "tipo"
+    | "cif_nif"
+    | "direccion"
+    | "poblacion"
+    | "provincia"
+    | "cp"
+    | "retiene_irpf"
+  > | null;
+  evento: Pick<Evento, "id" | "titulo" | "fecha"> | null;
+  factura_lineas: FacturaLinea[];
+}

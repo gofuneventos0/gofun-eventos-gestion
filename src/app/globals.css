@@ -45,3 +45,13 @@ body {
   background: rgb(148 163 184 / 0.5);
   border-radius: 9999px;
 }
+
+/* Impresión de facturas: sin fondo de app ni navegación */
+@media print {
+  body {
+    background: #fff !important;
+  }
+  main {
+    padding: 0 !important;
+  }
+}

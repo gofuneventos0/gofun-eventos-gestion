@@ -26,3 +26,8 @@ export const getResumenTesoreria = impl.getResumenTesoreria;
 export const getCobrosEvento = impl.getCobrosEvento;
 export const getCobro = impl.getCobro;
 export const getGasto = impl.getGasto;
+
+// Facturación (Fase 3) — solo lecturas; las mutaciones van por Server Actions
+export const getFacturas = impl.getFacturas;
+export const getFactura = impl.getFactura;
+export const getFacturaEvento = impl.getFacturaEvento;

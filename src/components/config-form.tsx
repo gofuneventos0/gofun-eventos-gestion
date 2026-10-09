@@ -57,8 +57,9 @@ export default function ConfigForm({ config }: { config: EmpresaConfig | null })
           Impuestos y facturación
         </h2>
         <p className="mb-4 text-xs text-tinta-600">
-          Como S.L. emites con IVA y sin retención propia. La retención de IRPF se aplica sólo
-          cuando el cliente es empresa o administración (se configura en cada cliente).
+          Como S.L. emites con IVA y sin retención propia. La retención de IRPF (15 % por defecto)
+          se aplica solo cuando el cliente es empresa o administración (se configura en cada
+          cliente).
         </p>
         <div className="grid gap-4 sm:grid-cols-3">
           <Campo label="IVA por defecto (%)">
@@ -75,7 +76,7 @@ export default function ConfigForm({ config }: { config: EmpresaConfig | null })
               type="number"
               name="irpf_defecto"
               step={0.01}
-              defaultValue={config?.irpf_defecto ?? 0}
+              defaultValue={config?.irpf_defecto ?? 15}
               className={CLASE_INPUT}
             />
           </Campo>

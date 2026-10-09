@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { SQLInputValue } from "node:sqlite";
 import { db } from "./db";
+import { IRPF_RETENCION_DEFECTO, siguienteNumeroFactura } from "@/lib/constantes";
 import type {
   Atraccion,
   Cliente,
@@ -11,6 +12,9 @@ import type {
   Evento,
   EventoCompleto,
   EventoLinea,
+  Factura,
+  FacturaCompleta,
+  FacturaLinea,
   Gasto,
   Movimiento,
   Pack,
@@ -793,4 +797,180 @@ export function getGasto(id: string): Gasto | null {
 
 export function borrarGasto(id: string): void {
   db.prepare("delete from gastos where id = ?").run(id);
+}
+
+// ------------------------------------------------------------
+// Facturación (Fase 3)
+// ------------------------------------------------------------
+function aFactura(f: Fila): Factura {
+  return {
+    id: String(f.id),
+    numero: String(f.numero),
+    serie: String(f.serie),
+    fecha: String(f.fecha),
+    cliente_id: f.cliente_id ? String(f.cliente_id) : null,
+    evento_id: f.evento_id ? String(f.evento_id) : null,
+    estado: f.estado as Factura["estado"],
+    base_imponible: Number(f.base_imponible),
+    iva: Number(f.iva),
+    iva_importe: Number(f.iva_importe),
+    irpf: Number(f.irpf),
+    irpf_importe: Number(f.irpf_importe),
+    total: Number(f.total),
+    notas: f.notas ? String(f.notas) : null,
+    creado_en: String(f.creado_en),
+  };
+}
+
+function aFacturaLinea(f: Fila): FacturaLinea {
+  return {
+    id: String(f.id),
+    factura_id: String(f.factura_id),
+    descripcion: String(f.descripcion),
+    cantidad: Number(f.cantidad),
+    precio_unitario: Number(f.precio_unitario),
+    orden: Number(f.orden),
+  };
+}
+
+function completarFactura(f: Fila): FacturaCompleta {
+  const factura = aFactura(f);
+
+  const lineas = (
+    db
+      .prepare("select * from factura_lineas where factura_id = ? order by orden asc")
+      .all(factura.id) as Fila[]
+  ).map(aFacturaLinea);
+
+  let cliente: FacturaCompleta["cliente"] = null;
+  if (factura.cliente_id) {
+    const c = db
+      .prepare(
+        `select id, nombre, tipo, cif_nif, direccion, poblacion, provincia, cp, retiene_irpf
+         from clientes where id = ?`
+      )
+      .get(factura.cliente_id) as Fila | undefined;
+    if (c) {
+      cliente = {
+        id: String(c.id),
+        nombre: String(c.nombre),
+        tipo: c.tipo as Cliente["tipo"],
+        cif_nif: (c.cif_nif as string) ?? null,
+        direccion: (c.direccion as string) ?? null,
+        poblacion: (c.poblacion as string) ?? null,
+        provincia: (c.provincia as string) ?? null,
+        cp: (c.cp as string) ?? null,
+        retiene_irpf: bool(c.retiene_irpf as number),
+      };
+    }
+  }
+
+  let evento: FacturaCompleta["evento"] = null;
+  if (factura.evento_id) {
+    const e = db
+      .prepare("select id, titulo, fecha from eventos where id = ?")
+      .get(factura.evento_id) as Fila | undefined;
+    if (e) {
+      evento = { id: String(e.id), titulo: String(e.titulo), fecha: String(e.fecha) };
+    }
+  }
+
+  return { ...factura, cliente, evento, factura_lineas: lineas };
+}
+
+export function getFacturas(desde: string, hasta: string): FacturaCompleta[] {
+  const filas = db
+    .prepare(
+      "select * from facturas where fecha between ? and ? order by fecha desc, numero desc"
+    )
+    .all(desde, hasta) as Fila[];
+  return filas.map(completarFactura);
+}
+
+export function getFactura(id: string): FacturaCompleta | null {
+  const f = db.prepare("select * from facturas where id = ?").get(id) as Fila | undefined;
+  return f ? completarFactura(f) : null;
+}
+
+/** Factura activa (no anulada) vinculada a un evento, si existe. */
+export function getFacturaEvento(eventoId: string): FacturaCompleta | null {
+  const f = db
+    .prepare(
+      `select * from facturas where evento_id = ? and estado != 'anulada'
+       order by fecha desc limit 1`
+    )
+    .get(eventoId) as Fila | undefined;
+  return f ? completarFactura(f) : null;
+}
+
+export interface NuevaFactura {
+  evento_id: string;
+  fecha: string;
+  estado: string; // 'proforma' | 'emitida'
+  serie: string;
+  iva: number; // tipo de IVA en %
+  irpf: number; // tasa de retención en % (se aplica solo si el cliente retiene)
+}
+
+/** Crea la factura a partir de las líneas y el cliente del evento. Devuelve el id. */
+export function crearFacturaDesdeEvento(nueva: NuevaFactura): { id: string } {
+  const evento = db
+    .prepare("select * from eventos where id = ?")
+    .get(nueva.evento_id) as Fila | undefined;
+  if (!evento) throw new Error("No se encontró el evento.");
+  const clienteId = evento.cliente_id ? String(evento.cliente_id) : null;
+  const cliente = clienteId
+    ? (db.prepare("select * from clientes where id = ?").get(clienteId) as Fila | undefined)
+    : undefined;
+  if (!cliente) throw new Error("El evento no tiene cliente asignado.");
+
+  const lineas = db
+    .prepare(
+      `select descripcion, cantidad, precio_unitario from evento_lineas
+       where evento_id = ? order by orden asc`
+    )
+    .all(nueva.evento_id) as Array<{ descripcion: string; cantidad: number; precio_unitario: number }>;
+  const base = lineas.reduce((s, l) => s + Number(l.cantidad) * Number(l.precio_unitario), 0);
+  if (base <= 0) throw new Error("El evento no tiene importes para facturar.");
+
+  const retiene = bool(cliente.retiene_irpf as number);
+  const irpfTasa = retiene ? (nueva.irpf > 0 ? nueva.irpf : IRPF_RETENCION_DEFECTO) : 0;
+  const ivaImporte = Number(((base * nueva.iva) / 100).toFixed(2));
+  const irpfImporte = Number(((base * irpfTasa) / 100).toFixed(2));
+  const total = Number((base + ivaImporte - irpfImporte).toFixed(2));
+
+  const anio = Number(String(nueva.fecha).slice(0, 4)) || new Date().getFullYear();
+  const numeros = (
+    db.prepare("select numero from facturas where serie = ?").all(nueva.serie) as Array<{
+      numero: string;
+    }>
+  ).map((r) => r.numero);
+  const numero = siguienteNumeroFactura(numeros, nueva.serie, anio);
+
+  const id = randomUUID();
+  const ahora = new Date().toISOString();
+
+  db.prepare(
+    `insert into facturas
+       (id, numero, serie, fecha, cliente_id, evento_id, estado,
+        base_imponible, iva, iva_importe, irpf, irpf_importe, total, notas, creado_en)
+     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id, numero, nueva.serie, nueva.fecha, String(cliente.id), nueva.evento_id, nueva.estado,
+    base, nueva.iva, ivaImporte, irpfTasa, irpfImporte, total, null, ahora
+  );
+
+  const insLinea = db.prepare(
+    `insert into factura_lineas (id, factura_id, descripcion, cantidad, precio_unitario, orden)
+     values (?, ?, ?, ?, ?, ?)`
+  );
+  lineas.forEach((l, i) =>
+    insLinea.run(randomUUID(), id, String(l.descripcion), Number(l.cantidad), Number(l.precio_unitario), i)
+  );
+
+  return { id };
+}
+
+export function cambiarEstadoFactura(id: string, estado: string): void {
+  db.prepare("update facturas set estado = ? where id = ?").run(estado, id);
 }

@@ -10,6 +10,7 @@ import {
   Menu,
   Package,
   PartyPopper,
+  Receipt,
   Settings,
   Users,
   Wallet,
@@ -21,6 +22,7 @@ const NAV = [
   { href: "/panel", label: "Panel", icon: LayoutDashboard },
   { href: "/calendario", label: "Calendario", icon: CalendarDays },
   { href: "/eventos", label: "Eventos", icon: PartyPopper },
+  { href: "/facturacion", label: "Facturación", icon: Receipt },
   { href: "/tesoreria", label: "Tesorería", icon: Wallet },
   { href: "/clientes", label: "Clientes", icon: Users },
   { href: "/catalogo", label: "Catálogo", icon: Package },
@@ -84,7 +86,7 @@ export default function Shell({
   return (
     <div className="min-h-screen lg:flex">
       {/* Sidebar escritorio */}
-      <aside className="hidden w-60 shrink-0 flex-col bg-tinta-950 lg:flex">
+      <aside className="hidden w-60 shrink-0 flex-col bg-tinta-950 lg:flex print:hidden">
         {marca}
         {nav}
         <div className="border-t border-white/5 p-4">
@@ -99,7 +101,7 @@ export default function Shell({
       </aside>
 
       {/* Barra superior móvil */}
-      <div className="sticky top-0 z-30 flex items-center justify-between bg-tinta-950 px-4 py-3 lg:hidden">
+      <div className="sticky top-0 z-30 flex items-center justify-between bg-tinta-950 px-4 py-3 lg:hidden print:hidden">
         <Link href="/panel" className="flex items-center gap-2">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-marca-500 text-xs font-black text-tinta-950">
             GF
@@ -116,7 +118,7 @@ export default function Shell({
       </div>
 
       {abierto && (
-        <div className="fixed inset-0 z-20 bg-tinta-950/95 pt-14 lg:hidden">
+        <div className="fixed inset-0 z-20 bg-tinta-950/95 pt-14 lg:hidden print:hidden">
           <div className="flex h-full flex-col">
             {nav}
             <div className="border-t border-white/5 p-4">

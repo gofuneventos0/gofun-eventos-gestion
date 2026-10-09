@@ -3,6 +3,7 @@ import type {
   CategoriaGasto,
   DuracionEvento,
   EstadoEvento,
+  EstadoFactura,
   MetodoPago,
   TipoCliente,
   TipoCuenta,
@@ -204,4 +205,55 @@ export const TIPOS_CUENTA: { valor: TipoCuenta; label: string }[] = [
 
 export function labelTipoCuenta(t: TipoCuenta): string {
   return TIPOS_CUENTA.find((x) => x.valor === t)?.label ?? t;
+}
+
+// ------------------------------------------------------------
+// Facturación (Fase 3)
+// ------------------------------------------------------------
+
+/** Retención de IRPF estándar cuando el cliente es empresa/administración. */
+export const IRPF_RETENCION_DEFECTO = 15;
+
+export const ESTADOS_FACTURA: Record<
+  EstadoFactura,
+  { label: string; chip: string; punto: string; texto: string }
+> = {
+  proforma: {
+    label: "Proforma",
+    chip: "bg-sky-100 text-sky-800 ring-sky-200",
+    punto: "bg-sky-500",
+    texto: "text-sky-700",
+  },
+  emitida: {
+    label: "Emitida",
+    chip: "bg-emerald-100 text-emerald-800 ring-emerald-200",
+    punto: "bg-emerald-500",
+    texto: "text-emerald-700",
+  },
+  anulada: {
+    label: "Anulada",
+    chip: "bg-rose-100 text-rose-800 ring-rose-200",
+    punto: "bg-rose-500",
+    texto: "text-rose-600",
+  },
+};
+
+export function labelEstadoFactura(e: EstadoFactura): string {
+  return ESTADOS_FACTURA[e]?.label ?? e;
+}
+
+/** Siguiente número correlativo para una serie y año: F2026-0001, F2026-0002… */
+export function siguienteNumeroFactura(
+  numeros: string[],
+  serie: string,
+  anio: number
+): string {
+  const base = `${serie}${anio}-`;
+  const max = numeros.reduce((m, n) => {
+    if (!String(n).startsWith(base)) return m;
+    const suf = String(n).slice(base.length);
+    const v = parseInt(suf, 10);
+    return Number.isFinite(v) ? Math.max(m, v) : m;
+  }, 0);
+  return `${base}${String(max + 1).padStart(4, "0")}`;
 }

@@ -204,6 +204,39 @@ create table if not exists gastos (
 
 create index if not exists gastos_fecha_idx on gastos (fecha desc);
 create index if not exists gastos_cuenta_idx on gastos (cuenta_id);
+
+create table if not exists facturas (
+  id                text primary key,
+  numero            text    not null unique,
+  serie             text    not null default 'F',
+  fecha             text    not null,
+  cliente_id        text references clientes (id) on delete restrict,
+  evento_id         text references eventos (id) on delete set null,
+  estado            text    not null default 'proforma' check (estado in ('proforma','emitida','anulada')),
+  base_imponible    real    not null default 0,
+  iva               real    not null default 21,
+  iva_importe       real    not null default 0,
+  irpf              real    not null default 0,
+  irpf_importe      real    not null default 0,
+  total             real    not null default 0,
+  notas             text,
+  creado_en         text    not null
+);
+
+create index if not exists facturas_fecha_idx on facturas (fecha desc);
+create index if not exists facturas_cliente_idx on facturas (cliente_id);
+create index if not exists facturas_evento_idx on facturas (evento_id);
+
+create table if not exists factura_lineas (
+  id                text primary key,
+  factura_id        text not null references facturas (id) on delete cascade,
+  descripcion       text    not null,
+  cantidad          integer not null default 1 check (cantidad > 0),
+  precio_unitario   real    not null default 0,
+  orden             integer not null default 0
+);
+
+create index if not exists factura_lineas_factura_idx on factura_lineas (factura_id);
 `;
 
 // ------------------------------------------------------------
@@ -217,9 +250,12 @@ function sembrar(d: DatabaseSync) {
   if (!hayConfig) {
     d.prepare(
       `insert into empresa_config (id, nombre, iva_defecto, irpf_defecto, serie_facturas, actualizado_en)
-       values (1, 'Go Fun Eventos', 21, 0, 'F', ?)`
+       values (1, 'Go Fun Eventos', 21, 15, 'F', ?)`
     ).run(ahora());
   }
+  // Normaliza el antiguo valor por defecto de IRPF (0 → 15 % estándar para
+  // facturas a clientes que retienen). El form de Ajustes permite cambiarlo.
+  d.prepare("update empresa_config set irpf_defecto = 15 where id = 1 and irpf_defecto = 0").run();
 
   // Catálogo (igual que la migración de Supabase)
   const hayAtracciones = d.prepare("select 1 from atracciones limit 1").get();
