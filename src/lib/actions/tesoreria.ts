@@ -2,13 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
-import { esModoLocal } from "@/lib/supabase/env";
 import {
-  guardarCobro as guardarCobroLocal,
-  borrarCobro as borrarCobroLocal,
-  guardarGasto as guardarGastoLocal,
-  borrarGasto as borrarGastoLocal,
+  guardarCobro as guardarCobroDb,
+  borrarCobro as borrarCobroDb,
+  guardarGasto as guardarGastoDb,
+  borrarGasto as borrarGastoDb,
 } from "@/lib/local/repo";
 import { requiereSesion } from "./utils";
 import { texto, numero, type Resultado } from "./form";
@@ -27,7 +25,7 @@ function validarMovimiento(formData: FormData) {
   return { error: null, concepto, fecha, importe, cuenta_id };
 }
 
-function revalidarTesorería(eventoId: string | null) {
+function revalidarTesoreria(eventoId: string | null) {
   revalidatePath("/tesoreria");
   revalidatePath("/panel");
   if (eventoId) revalidatePath(`/eventos/${eventoId}`);
@@ -44,6 +42,7 @@ export async function guardarCobro(
   if (v.error) return { ok: false, mensaje: v.error };
 
   const fila = {
+    id,
     cuenta_id: v.cuenta_id,
     evento_id: texto(formData, "evento_id"),
     cliente_id: texto(formData, "cliente_id"),
@@ -54,59 +53,32 @@ export async function guardarCobro(
     notas: texto(formData, "notas"),
   };
 
-  if (esModoLocal()) {
-    try {
-      guardarCobroLocal(fila, id);
-    } catch (e) {
-      return {
-        ok: false,
-        mensaje: e instanceof Error ? e.message : "Error al guardar el cobro.",
-      };
-    }
-    revalidarTesorería(fila.evento_id);
-    redirect("/tesoreria");
+  try {
+    await guardarCobroDb(fila, id);
+  } catch (e) {
+    return {
+      ok: false,
+      mensaje: e instanceof Error ? e.message : "Error al guardar el cobro.",
+    };
   }
 
-  const supabase = await createClient();
-  if (id) {
-    const { error } = await supabase.from("cobros").update(fila).eq("id", id);
-    if (error) return { ok: false, mensaje: error.message };
-  } else {
-    const { error } = await supabase.from("cobros").insert(fila);
-    if (error) return { ok: false, mensaje: error.message };
-  }
-  revalidarTesorería(fila.evento_id);
+  revalidarTesoreria(fila.evento_id);
   redirect("/tesoreria");
 }
 
 export async function borrarCobro(id: string, eventoId?: string): Promise<Resultado> {
   await requiereSesion();
 
-  if (esModoLocal()) {
-    try {
-      borrarCobroLocal(id);
-    } catch (e) {
-      return {
-        ok: false,
-        mensaje: e instanceof Error ? e.message : "Error al eliminar el cobro.",
-      };
-    }
-    revalidarTesorería(eventoId ?? null);
-    return { ok: true, mensaje: "Cobro eliminado." };
+  try {
+    await borrarCobroDb(id);
+  } catch (e) {
+    return {
+      ok: false,
+      mensaje: e instanceof Error ? e.message : "Error al eliminar el cobro.",
+    };
   }
 
-  const supabase = await createClient();
-  if (!eventoId) {
-    const { data } = await supabase
-      .from("cobros")
-      .select("evento_id")
-      .eq("id", id)
-      .maybeSingle();
-    eventoId = (data?.evento_id as string | undefined) ?? undefined;
-  }
-  const { error } = await supabase.from("cobros").delete().eq("id", id);
-  if (error) return { ok: false, mensaje: error.message };
-  revalidarTesorería(eventoId ?? null);
+  revalidarTesoreria(eventoId ?? null);
   return { ok: true, mensaje: "Cobro eliminado." };
 }
 
@@ -121,6 +93,7 @@ export async function guardarGasto(
   if (v.error) return { ok: false, mensaje: v.error };
 
   const fila = {
+    id,
     cuenta_id: v.cuenta_id,
     categoria: texto(formData, "categoria") ?? "otros",
     concepto: v.concepto,
@@ -132,50 +105,31 @@ export async function guardarGasto(
     notas: texto(formData, "notas"),
   };
 
-  if (esModoLocal()) {
-    try {
-      guardarGastoLocal(fila, id);
-    } catch (e) {
-      return {
-        ok: false,
-        mensaje: e instanceof Error ? e.message : "Error al guardar el gasto.",
-      };
-    }
-    revalidarTesorería(null);
-    redirect("/tesoreria");
+  try {
+    await guardarGastoDb(fila, id);
+  } catch (e) {
+    return {
+      ok: false,
+      mensaje: e instanceof Error ? e.message : "Error al guardar el gasto.",
+    };
   }
 
-  const supabase = await createClient();
-  if (id) {
-    const { error } = await supabase.from("gastos").update(fila).eq("id", id);
-    if (error) return { ok: false, mensaje: error.message };
-  } else {
-    const { error } = await supabase.from("gastos").insert(fila);
-    if (error) return { ok: false, mensaje: error.message };
-  }
-  revalidarTesorería(null);
+  revalidarTesoreria(null);
   redirect("/tesoreria");
 }
 
 export async function borrarGasto(id: string): Promise<Resultado> {
   await requiereSesion();
 
-  if (esModoLocal()) {
-    try {
-      borrarGastoLocal(id);
-    } catch (e) {
-      return {
-        ok: false,
-        mensaje: e instanceof Error ? e.message : "Error al eliminar el gasto.",
-      };
-    }
-    revalidarTesorería(null);
-    return { ok: true, mensaje: "Gasto eliminado." };
+  try {
+    await borrarGastoDb(id);
+  } catch (e) {
+    return {
+      ok: false,
+      mensaje: e instanceof Error ? e.message : "Error al eliminar el gasto.",
+    };
   }
 
-  const supabase = await createClient();
-  const { error } = await supabase.from("gastos").delete().eq("id", id);
-  if (error) return { ok: false, mensaje: error.message };
-  revalidarTesorería(null);
+  revalidarTesoreria(null);
   return { ok: true, mensaje: "Gasto eliminado." };
 }

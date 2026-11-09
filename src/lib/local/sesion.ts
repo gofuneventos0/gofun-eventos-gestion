@@ -1,12 +1,23 @@
 /**
- * Token de sesión firmado (HMAC-SHA256) para el modo local.
+ * Token de sesión firmado (HMAC-SHA256) de la app.
  * Stateless: lo puede verificar el proxy (middleware) sin tocar la base de datos,
  * usando solo WebCrypto (compatible con los runtimes que se cruzan por el camino).
  */
 
 export const COOKIE_SESION = "gofun_sesion";
 const DURACION_MS = 30 * 24 * 60 * 60 * 1000; // 30 días
-const SECRET = process.env.GOFUN_SESION_SECRET ?? "gofun-dev-secret-cambiar-en-produccion";
+const SECRET_POR_DEFECTO = "gofun-dev-secret-cambiar-en-produccion";
+const SECRET = process.env.GOFUN_SESION_SECRET ?? SECRET_POR_DEFECTO;
+
+if (
+  process.env.NODE_ENV === "production" &&
+  process.env.NEXT_PHASE !== "phase-production-build" &&
+  SECRET === SECRET_POR_DEFECTO
+) {
+  console.warn(
+    "[auth] Define GOFUN_SESION_SECRET con una cadena aleatoria: ahora mismo la cookie de sesión usa el secreto de desarrollo."
+  );
+}
 
 const enc = new TextEncoder();
 

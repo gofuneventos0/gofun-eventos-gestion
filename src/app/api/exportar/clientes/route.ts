@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getSessionUser } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/local/sesion-servidor";
 import { getClientes } from "@/lib/data";
 import { construirCsv, descargarCsv } from "@/lib/csv";
 import { labelTipoCliente } from "@/lib/constantes";

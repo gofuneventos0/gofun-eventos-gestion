@@ -1,54 +1,94 @@
-import { DatabaseSync } from "node:sqlite";
+import { createClient, type Client, type InValue } from "@libsql/client";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import { hashPassword } from "./password";
 
 /**
- * Base SQLite local (modo local, sin Supabase).
- * El archivo vive en /data/gofun.db (ignorado por git). El esquema replica
- * supabase/migrations/20261008120000_init.sql.
+ * Base de datos SQLite mediante libSQL (Turso).
  *
- * La conexión se abre de forma perezosa (al primer uso): evita que los workers
- * de `next build` se pisen al evaluar los módulos a la vez.
+ * - Producción (Netlify): Turso. Se configura con TURSO_DATABASE_URL y
+ *   TURSO_AUTH_TOKEN. La conexión es HTTP, así que funciona en serverless
+ *   sin depender del sistema de archivos.
+ * - Desarrollo: si no hay variables de Turso, usa un archivo local
+ *   data/gofun.db (ignorado por git). Mismo esquema y mismas consultas.
+ *
+ * El esquema se crea y se siembra de forma perezosa al primer uso, una sola
+ * vez por proceso.
  */
 
-const DIR = path.join(process.cwd(), "data");
-const FILE = path.join(DIR, "gofun.db");
+const URL_DB = (process.env.TURSO_DATABASE_URL ?? "").trim();
+const TOKEN_DB = (process.env.TURSO_AUTH_TOKEN ?? "").trim();
 
-let instancia: DatabaseSync | null = null;
+/** true si estamos conectados a Turso (producción) y false en local. */
+export const usandoTurso = URL_DB.length > 0;
 
-function abrir(): DatabaseSync {
-  if (instancia) return instancia;
+let clientePromesa: Promise<Client> | null = null;
 
-  fs.mkdirSync(DIR, { recursive: true });
-  const d = new DatabaseSync(FILE);
-
-  // El primer arranque concurrente (build, varios procesos) puede dar
-  // "database is locked": se reintenta hasta que el otro proceso cedan.
-  let reintentos = 0;
-  for (;;) {
-    try {
-      d.exec("PRAGMA busy_timeout = 10000;");
-      d.exec("PRAGMA journal_mode = WAL;");
-      d.exec("PRAGMA foreign_keys = ON;");
-      break;
-    } catch (e) {
-      const err = e as { errcode?: number };
-      if (err.errcode === 5 && reintentos < 8) {
-        reintentos++;
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
-        continue;
-      }
-      throw e;
-    }
+function crearCliente(): Client {
+  if (usandoTurso) {
+    return createClient({ url: URL_DB, authToken: TOKEN_DB || undefined });
   }
 
-  d.exec(ESQUEMA);
-  sembrar(d);
+  const archivo = path.join(process.cwd(), "data", "gofun.db");
+  fs.mkdirSync(path.dirname(archivo), { recursive: true });
+  return createClient({ url: pathToFileURL(archivo).href });
+}
 
-  instancia = d;
-  return d;
+function obtenerCliente(): Promise<Client> {
+  if (!clientePromesa) {
+    const cliente = crearCliente();
+    clientePromesa = inicializar(cliente)
+      .then(() => cliente)
+      .catch((error) => {
+        // Si falla el primer acceso (red, credenciales…), permitimos reintentar.
+        clientePromesa = null;
+        throw error;
+      });
+  }
+  return clientePromesa;
+}
+
+async function inicializar(cliente: Client): Promise<void> {
+  await cliente.executeMultiple(ESQUEMA);
+  await sembrar(cliente);
+}
+
+// ------------------------------------------------------------
+// Helpers de consulta
+// ------------------------------------------------------------
+export type Fila = Record<string, unknown>;
+
+/** Ejecuta una consulta y devuelve todas las filas. */
+export async function all<T = Fila>(sql: string, ...args: InValue[]): Promise<T[]> {
+  const cliente = await obtenerCliente();
+  const resultado = await cliente.execute({ sql, args });
+  return resultado.rows as unknown as T[];
+}
+
+/** Ejecuta una consulta y devuelve la primera fila (o null). */
+export async function get<T = Fila>(sql: string, ...args: InValue[]): Promise<T | null> {
+  const filas = await all<T>(sql, ...args);
+  return filas[0] ?? null;
+}
+
+/** Ejecuta una sentencia de escritura. */
+export async function run(sql: string, ...args: InValue[]): Promise<void> {
+  const cliente = await obtenerCliente();
+  await cliente.execute({ sql, args });
+}
+
+/** Ejecuta un lote de escrituras de forma atómica. */
+export async function batch(
+  sentencias: Array<{ sql: string; args?: InValue[] }>
+): Promise<void> {
+  if (!sentencias.length) return;
+  const cliente = await obtenerCliente();
+  await cliente.batch(
+    sentencias.map((s) => ({ sql: s.sql, args: s.args ?? [] })),
+    "write"
+  );
 }
 
 // ------------------------------------------------------------
@@ -259,91 +299,106 @@ create index if not exists bienes_inversion_fecha_idx on bienes_inversion (fecha
 // ------------------------------------------------------------
 // Semilla (idempotente)
 // ------------------------------------------------------------
-function sembrar(d: DatabaseSync) {
-  const ahora = () => new Date().toISOString();
+async function sembrar(cliente: Client): Promise<void> {
+  // Todo el sembrado va en una transacción de escritura: si dos instancias
+  // serverless arrancan a la vez, la segunda espera y ve los datos ya creados.
+  const tx = await cliente.transaction("write");
+  try {
+    const ahora = () => new Date().toISOString();
+    const consultar = async (sql: string, args: InValue[] = []) =>
+      (await tx.execute({ sql, args })).rows;
 
-  // Configuración de la empresa
-  const hayConfig = d.prepare("select 1 from empresa_config where id = 1").get();
-  if (!hayConfig) {
-    d.prepare(
-      `insert into empresa_config (id, nombre, iva_defecto, irpf_defecto, serie_facturas, actualizado_en)
-       values (1, 'Go Fun Eventos', 21, 15, 'F', ?)`
-    ).run(ahora());
-  }
-  // Normaliza el antiguo valor por defecto de IRPF (0 → 15 % estándar para
-  // facturas a clientes que retienen). El form de Ajustes permite cambiarlo.
-  d.prepare("update empresa_config set irpf_defecto = 15 where id = 1 and irpf_defecto = 0").run();
-
-  // Catálogo (igual que la migración de Supabase)
-  const hayAtracciones = d.prepare("select 1 from atracciones limit 1").get();
-  if (!hayAtracciones) {
-    const insAtraccion = d.prepare(`
-      insert into atracciones (id, nombre, slug, categoria, descripcion, precio_base, duracion_base, incluida_en_packs, orden, activa, creado_en)
-      values (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-    `);
-    const atracciones: Array<[string, string, string, string | null, number | null]> = [
-      ["Castillos Hinchables", "castillos", "infantil", "Saltos y diversión para comuniones y cumpleaños. Hinchables homologados con revisión técnica.", 150],
-      ["Toro Mecánico", "toro", "adultos", "Incluye monitor profesional para adaptar la velocidad a niños y adultos.", 350],
-      ["La Barredora Humana", "barredora", "deportes", "Demuestra tus reflejos. ¿Quién aguantará más tiempo en pie sin caer?", 300],
-      ["Deslizador Acuático", "deslizador", "verano", "La mejor opción para eventos de verano y fiestas acuáticas.", 250],
-      ["Cañón de Espuma", "espona", "verano", "Fiesta de la espuma apta para todas las edades.", 200],
-      ["Equipo de Música", "musica", "servicios", "Sonido e iluminación profesional para ambientar tu celebración.", null],
-      ["Futbolín Humano", "futbolin", "deportes", "Trabajo en equipo y competencia deportiva en formato gigante.", 150],
-      ["Circuito de Karts", "karts", "deportes", "Circuito móvil de karts a pedales para poner a prueba tu habilidad de conducción.", 350],
-      ["Camas Elásticas", "camas", "infantil", "Estructuras de salto con protección de red de alta seguridad.", 80],
-      ["Zona de Juegos", "zona-juegos", "servicios", "Tiro con arco, mini golf, bádminton, ping pong y paracaídas de colores.", null],
-    ];
-    const soloPacks = new Set(["musica", "zona-juegos"]);
-    atracciones.forEach(([nombre, slug, categoria, descripcion, precio], i) =>
-      insAtraccion.run(
-        randomUUID(), nombre, slug, categoria, descripcion, precio, "3-4 h",
-        soloPacks.has(slug) ? 1 : 0, i + 1, ahora()
-      )
+    // Configuración de la empresa
+    const hayConfig = await consultar("select 1 from empresa_config where id = 1");
+    if (!hayConfig.length) {
+      await tx.execute({
+        sql: `insert into empresa_config (id, nombre, iva_defecto, irpf_defecto, serie_facturas, actualizado_en)
+              values (1, 'Go Fun Eventos', 21, 15, 'F', ?)`,
+        args: [ahora()],
+      });
+    }
+    // Normaliza el antiguo valor por defecto de IRPF (0 → 15 % estándar para
+    // facturas a clientes que retienen). El form de Ajustes permite cambiarlo.
+    await tx.execute(
+      "update empresa_config set irpf_defecto = 15 where id = 1 and irpf_defecto = 0"
     );
 
-    const insPack = d.prepare(`
-      insert into packs (id, nombre, descripcion, incluye, precio_base, orden, activo, creado_en)
-      values (?, ?, ?, ?, ?, ?, 1, ?)
-    `);
-    const packs: Array<[string, string, string[]]> = [
-      ["Pack Estándar", "Barredora o toro + hinchables (3 h).", ["⚡ Barredora o Toro 🐂", "🏰 Hinchables (3h)"]],
-      ["Pack Verano", "La combinación acuática completa para primavera y verano.", ["🧼 Cañón de Espuma", "🏰 Deslizador Acuático", "🔊 Equipo Sonido", "⚽ Futbolín Humano"]],
-      ["Pack Despedida", "Nivel profesional para despedidas de soltero/a.", ["🐂 Toro Mecánico (Nivel Pro)", "🔊 Equipo Sonido 2000W", "🎁 Regalo sorpresa"]],
-      ["Pack VIP", "Todo incluido, el pack más completo.", ["⚡ Barredora o Toro 🐂", "🏰 Deslizador Acuático", "🔊 Equipo Sonido", "🧼 Cañón de Espuma", "🏰 Hinchable (3h)"]],
-      ["Pack a Medida", "Combina las atracciones que quieras. Ej.: Toro + Castillo = 450 € · Castillo + Futbolín = 275 €.", ["Configura tu combinación personalizada"]],
-    ];
-    packs.forEach(([nombre, descripcion, incluye], i) =>
-      insPack.run(randomUUID(), nombre, descripcion, JSON.stringify(incluye), null, i + 1, ahora())
-    );
-  }
+    // Catálogo (igual que la migración original)
+    const hayAtracciones = await consultar("select 1 from atracciones limit 1");
+    if (!hayAtracciones.length) {
+      const atracciones: Array<[string, string, string, string | null, number | null]> = [
+        ["Castillos Hinchables", "castillos", "infantil", "Saltos y diversión para comuniones y cumpleaños. Hinchables homologados con revisión técnica.", 150],
+        ["Toro Mecánico", "toro", "adultos", "Incluye monitor profesional para adaptar la velocidad a niños y adultos.", 350],
+        ["La Barredora Humana", "barredora", "deportes", "Demuestra tus reflejos. ¿Quién aguantará más tiempo en pie sin caer?", 300],
+        ["Deslizador Acuático", "deslizador", "verano", "La mejor opción para eventos de verano y fiestas acuáticas.", 250],
+        ["Cañón de Espuma", "espona", "verano", "Fiesta de la espuma apta para todas las edades.", 200],
+        ["Equipo de Música", "musica", "servicios", "Sonido e iluminación profesional para ambientar tu celebración.", null],
+        ["Futbolín Humano", "futbolin", "deportes", "Trabajo en equipo y competencia deportiva en formato gigante.", 150],
+        ["Circuito de Karts", "karts", "deportes", "Circuito móvil de karts a pedales para poner a prueba tu habilidad de conducción.", 350],
+        ["Camas Elásticas", "camas", "infantil", "Estructuras de salto con protección de red de alta seguridad.", 80],
+        ["Zona de Juegos", "zona-juegos", "servicios", "Tiro con arco, mini golf, bádminton, ping pong y paracaídas de colores.", null],
+      ];
+      const soloPacks = new Set(["musica", "zona-juegos"]);
+      await tx.batch(
+        atracciones.map(([nombre, slug, categoria, descripcion, precio], i) => ({
+          sql: `insert into atracciones (id, nombre, slug, categoria, descripcion, precio_base, duracion_base, incluida_en_packs, orden, activa, creado_en)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+          args: [
+            randomUUID(), nombre, slug, categoria, descripcion, precio, "3-4 h",
+            soloPacks.has(slug) ? 1 : 0, i + 1, ahora(),
+          ],
+        })),
+      );
 
-  // Usuario local por defecto: admin / admin
-  const hayUsuarios = d.prepare("select 1 from usuarios limit 1").get();
-  if (!hayUsuarios) {
-    d.prepare(
-      `insert into usuarios (id, email, password_hash, nombre, creado_en) values (?, ?, ?, ?, ?)`
-    ).run(randomUUID(), "admin", hashPassword("admin"), "Administración", ahora());
-  }
+      const packs: Array<[string, string, string[]]> = [
+        ["Pack Estándar", "Barredora o toro + hinchables (3 h).", ["⚡ Barredora o Toro 🐂", "🏰 Hinchables (3h)"]],
+        ["Pack Verano", "La combinación acuática completa para primavera y verano.", ["🧼 Cañón de Espuma", "🏰 Deslizador Acuático", "🔊 Equipo Sonido", "⚽ Futbolín Humano"]],
+        ["Pack Despedida", "Nivel profesional para despedidas de soltero/a.", ["🐂 Toro Mecánico (Nivel Pro)", "🔊 Equipo Sonido 2000W", "🎁 Regalo sorpresa"]],
+        ["Pack VIP", "Todo incluido, el pack más completo.", ["⚡ Barredora o Toro 🐂", "🏰 Deslizador Acuático", "🔊 Equipo Sonido", "🧼 Cañón de Espuma", "🏰 Hinchable (3h)"]],
+        ["Pack a Medida", "Combina las atracciones que quieras. Ej.: Toro + Castillo = 450 € · Castillo + Futbolín = 275 €.", ["Configura tu combinación personalizada"]],
+      ];
+      await tx.batch(
+        packs.map(([nombre, descripcion, incluye], i) => ({
+          sql: `insert into packs (id, nombre, descripcion, incluye, precio_base, orden, activo, creado_en)
+                values (?, ?, ?, ?, ?, ?, 1, ?)`,
+          args: [randomUUID(), nombre, descripcion, JSON.stringify(incluye), null, i + 1, ahora()],
+        })),
+      );
+    }
 
-  // Cuentas de tesorería por defecto
-  const hayCuentas = d.prepare("select 1 from cuentas limit 1").get();
-  if (!hayCuentas) {
-    const insCuenta = d.prepare(
-      `insert into cuentas (id, nombre, tipo, saldo_inicial, activa, creado_en) values (?, ?, ?, ?, 1, ?)`
-    );
-    insCuenta.run(randomUUID(), "Caja", "caja", 0, ahora());
-    insCuenta.run(randomUUID(), "Banco", "banco", 0, ahora());
+    // Usuario por defecto: admin / admin
+    const hayUsuarios = await consultar("select 1 from usuarios limit 1");
+    if (!hayUsuarios.length) {
+      await tx.execute({
+        sql: "insert into usuarios (id, email, password_hash, nombre, creado_en) values (?, ?, ?, ?, ?)",
+        args: [randomUUID(), "admin", hashPassword("admin"), "Administración", ahora()],
+      });
+    }
+
+    // Cuentas de tesorería por defecto
+    const hayCuentas = await consultar("select 1 from cuentas limit 1");
+    if (!hayCuentas.length) {
+      await tx.batch(
+        [
+          {
+            sql: "insert into cuentas (id, nombre, tipo, saldo_inicial, activa, creado_en) values (?, ?, ?, ?, 1, ?)",
+            args: [randomUUID(), "Caja", "caja", 0, ahora()],
+          },
+          {
+            sql: "insert into cuentas (id, nombre, tipo, saldo_inicial, activa, creado_en) values (?, ?, ?, ?, 1, ?)",
+            args: [randomUUID(), "Banco", "banco", 0, ahora()],
+          },
+        ],
+      );
+    }
+
+  await tx.commit();
+  } catch (error) {
+    try {
+      await tx.rollback();
+    } catch {
+      // Si la transacción ya está cerrada, ignoramos el error de rollback.
+    }
+    throw error;
   }
 }
-
-/**
- * Proxy con inicialización perezosa: `db.prepare(...)` abre la conexión la
- * primera vez que se usa. Así los procesos/threads no compiten al importar.
- */
-export const db: DatabaseSync = new Proxy({} as DatabaseSync, {
-  get(_target, prop) {
-    const real = abrir();
-    const v = (real as unknown as Record<PropertyKey, unknown>)[prop];
-    return typeof v === "function" ? (v as (...args: unknown[]) => unknown).bind(real) : v;
-  },
-}) as DatabaseSync;

@@ -2,12 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
-import { esModoLocal } from "@/lib/supabase/env";
 import {
-  guardarEvento as guardarEventoLocal,
-  cambiarEstadoEvento as cambiarEstadoEventoLocal,
-  borrarEvento as borrarEventoLocal,
+  guardarEvento as guardarEventoDb,
+  cambiarEstadoEvento as cambiarEstadoEventoDb,
+  borrarEvento as borrarEventoDb,
 } from "@/lib/local/repo";
 import type { EstadoEvento } from "@/lib/types";
 import { requiereSesion } from "./utils";
@@ -52,6 +50,7 @@ export async function guardarEvento(
   if (!fecha) return { ok: false, mensaje: "La fecha es obligatoria." };
 
   const fila = {
+    id,
     cliente_id: texto(formData, "cliente_id"),
     titulo,
     tipo: texto(formData, "tipo") ?? "particular",
@@ -72,64 +71,23 @@ export async function guardarEvento(
 
   const lineas = parsearLineas(formData);
 
-  // Modo local: SQLite administra el evento y sus líneas en una sola transacción.
-  if (esModoLocal()) {
-    // El redirect va FUERA del try/catch: redirect() lanza un error interno
-    // (NEXT_REDIRECT) que el catch no debe capturar.
-    let nuevoId: string;
-    try {
-      ({ id: nuevoId } = guardarEventoLocal({ ...fila, id }, lineas));
-    } catch (e) {
-      return {
-        ok: false,
-        mensaje: e instanceof Error ? e.message : "Error al guardar el evento.",
-      };
-    }
-    revalidatePath("/calendario");
-    revalidatePath("/eventos");
-    revalidatePath("/panel");
-    revalidatePath(`/eventos/${nuevoId}`);
-    redirect(`/eventos/${nuevoId}`);
-  }
-
-  const supabase = await createClient();
-
-  let eventoId = id;
-
-  if (id) {
-    const { error } = await supabase.from("eventos").update(fila).eq("id", id);
-    if (error) return { ok: false, mensaje: error.message };
-    const { error: errDel } = await supabase
-      .from("evento_lineas")
-      .delete()
-      .eq("evento_id", id);
-    if (errDel) return { ok: false, mensaje: errDel.message };
-  } else {
-    const { data, error } = await supabase.from("eventos").insert(fila).select("id").single();
-    if (error) return { ok: false, mensaje: error.message };
-    eventoId = data.id as string;
-  }
-
-  if (lineas.length && eventoId) {
-    const { error } = await supabase.from("evento_lineas").insert(
-      lineas.map((l, i) => ({
-        evento_id: eventoId,
-        atraccion_id: l.atraccion_id,
-        descripcion: l.descripcion,
-        cantidad: l.cantidad,
-        precio_unitario: l.precio_unitario,
-        orden: i,
-      }))
-    );
-    if (error) return { ok: false, mensaje: error.message };
+  // El redirect va FUERA del try/catch: redirect() lanza un error interno
+  // (NEXT_REDIRECT) que el catch no debe capturar.
+  let nuevoId: string;
+  try {
+    ({ id: nuevoId } = await guardarEventoDb(fila, lineas));
+  } catch (e) {
+    return {
+      ok: false,
+      mensaje: e instanceof Error ? e.message : "Error al guardar el evento.",
+    };
   }
 
   revalidatePath("/calendario");
   revalidatePath("/eventos");
   revalidatePath("/panel");
-  if (eventoId) revalidatePath(`/eventos/${eventoId}`);
-
-  redirect(`/eventos/${eventoId}`);
+  revalidatePath(`/eventos/${nuevoId}`);
+  redirect(`/eventos/${nuevoId}`);
 }
 
 export async function cambiarEstadoEvento(
@@ -138,26 +96,14 @@ export async function cambiarEstadoEvento(
 ): Promise<Resultado> {
   await requiereSesion();
 
-  if (esModoLocal()) {
-    try {
-      cambiarEstadoEventoLocal(id, estado);
-    } catch (e) {
-      return {
-        ok: false,
-        mensaje: e instanceof Error ? e.message : "Error al actualizar el estado.",
-      };
-    }
-    revalidatePath("/calendario");
-    revalidatePath("/eventos");
-    revalidatePath(`/eventos/${id}`);
-    revalidatePath("/panel");
-    return { ok: true, mensaje: "Estado actualizado." };
+  try {
+    await cambiarEstadoEventoDb(id, estado);
+  } catch (e) {
+    return {
+      ok: false,
+      mensaje: e instanceof Error ? e.message : "Error al actualizar el estado.",
+    };
   }
-
-  const supabase = await createClient();
-  const { error } = await supabase.from("eventos").update({ estado }).eq("id", id);
-
-  if (error) return { ok: false, mensaje: error.message };
 
   revalidatePath("/calendario");
   revalidatePath("/eventos");
@@ -169,25 +115,14 @@ export async function cambiarEstadoEvento(
 export async function borrarEvento(id: string): Promise<Resultado> {
   await requiereSesion();
 
-  if (esModoLocal()) {
-    try {
-      borrarEventoLocal(id);
-    } catch (e) {
-      return {
-        ok: false,
-        mensaje: e instanceof Error ? e.message : "Error al eliminar el evento.",
-      };
-    }
-    revalidatePath("/calendario");
-    revalidatePath("/eventos");
-    revalidatePath("/panel");
-    return { ok: true, mensaje: "Evento eliminado." };
+  try {
+    await borrarEventoDb(id);
+  } catch (e) {
+    return {
+      ok: false,
+      mensaje: e instanceof Error ? e.message : "Error al eliminar el evento.",
+    };
   }
-
-  const supabase = await createClient();
-  const { error } = await supabase.from("eventos").delete().eq("id", id);
-
-  if (error) return { ok: false, mensaje: error.message };
 
   revalidatePath("/calendario");
   revalidatePath("/eventos");

@@ -53,7 +53,7 @@ export function hora(value: string | null | undefined): string {
   return `${h}:${m}`;
 }
 
-/** '2026-10-08' → '2026-10-08' (Supabase devuelve string) */
+/** '2026-10-08' → '2026-10-08' (la BD devuelve string) */
 export function hoyISO(): string {
   return format(new Date(), "yyyy-MM-dd");
 }

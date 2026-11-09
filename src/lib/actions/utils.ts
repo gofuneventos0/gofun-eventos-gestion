@@ -1,6 +1,6 @@
 "use server";
 
-import { getSessionUser } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/local/sesion-servidor";
 
 /** Toda Server Action debe verificar la sesión: son alcanzables por POST directo. */
 export async function requiereSesion() {

@@ -1,6 +1,6 @@
 // ------------------------------------------------------------
-// Tipos del esquema de Supabase (Fase 0 + 1)
-// Mantener en sincronía con supabase/migrations/*.sql
+// Tipos del dominio (Fase 0 + 1)
+// Mantener en sincronía con el esquema de src/lib/local/db.ts
 // ------------------------------------------------------------
 
 export type EstadoEvento =
@@ -211,7 +211,7 @@ export interface EmpresaConfig {
   actualizado_en: string;
 }
 
-/** Evento con sus líneas y cliente ya resueltos (join de Supabase). */
+/** Evento con sus líneas y cliente ya resueltos (join de la BD). */
 export interface EventoCompleto extends Evento {
   cliente: Pick<Cliente, "id" | "nombre" | "tipo" | "retiene_irpf" | "telefono"> | null;
   evento_lineas: EventoLinea[];

@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { SQLInputValue } from "node:sqlite";
-import { db } from "./db";
+import { all, batch, get, run, type Fila } from "./db";
 import { IRPF_RETENCION_DEFECTO, siguienteNumeroFactura } from "@/lib/constantes";
 import type {
   Atraccion,
@@ -23,12 +22,12 @@ import type {
   SaldoCuenta,
   TipoBienInversion,
 } from "@/lib/types";
+import type { InValue } from "@libsql/client";
 
 // ------------------------------------------------------------
 // Helpers de mapeo (SQLite → tipos)
 // ------------------------------------------------------------
 const bool = (v: number | null | undefined) => v === 1;
-type Fila = Record<string, unknown>;
 
 function aConfig(f: Fila): EmpresaConfig {
   return {
@@ -136,20 +135,22 @@ function aLinea(f: Fila): EventoLinea {
   };
 }
 
-function lineasDe(eventoId: string): EventoLinea[] {
-  const filas = db
-    .prepare("select * from evento_lineas where evento_id = ? order by orden asc")
-    .all(eventoId) as Fila[];
+async function lineasDe(eventoId: string): Promise<EventoLinea[]> {
+  const filas = await all<Fila>(
+    "select * from evento_lineas where evento_id = ? order by orden asc",
+    eventoId
+  );
   return filas.map(aLinea);
 }
 
-function completar(f: Fila): EventoCompleto {
+async function completar(f: Fila): Promise<EventoCompleto> {
   const evento = aEvento(f);
   let cliente: EventoCompleto["cliente"] = null;
   if (evento.cliente_id) {
-    const c = db
-      .prepare("select id, nombre, tipo, retiene_irpf, telefono from clientes where id = ?")
-      .get(evento.cliente_id) as Fila | undefined;
+    const c = await get<Fila>(
+      "select id, nombre, tipo, retiene_irpf, telefono from clientes where id = ?",
+      evento.cliente_id
+    );
     if (c) {
       cliente = {
         id: String(c.id),
@@ -160,7 +161,7 @@ function completar(f: Fila): EventoCompleto {
       };
     }
   }
-  return { ...evento, cliente, evento_lineas: lineasDe(evento.id) };
+  return { ...evento, cliente, evento_lineas: await lineasDe(evento.id) };
 }
 
 const JUNTAR =
@@ -169,69 +170,69 @@ const JUNTAR =
 // ------------------------------------------------------------
 // Lecturas (misma API que data.ts)
 // ------------------------------------------------------------
-export function getConfig(): EmpresaConfig | null {
-  const f = db.prepare("select * from empresa_config where id = 1").get() as Fila | undefined;
+export async function getConfig(): Promise<EmpresaConfig | null> {
+  const f = await get<Fila>("select * from empresa_config where id = 1");
   return f ? aConfig(f) : null;
 }
 
-export function getAtracciones(soloActivas = true): Atraccion[] {
+export async function getAtracciones(soloActivas = true): Promise<Atraccion[]> {
   const sql = soloActivas
     ? "select * from atracciones where activa = 1 order by orden asc"
     : "select * from atracciones order by orden asc";
-  const filas = db.prepare(sql).all() as Fila[];
+  const filas = await all<Fila>(sql);
   return filas.map(aAtraccion);
 }
 
-export function getPacks(): Pack[] {
-  const filas = db
-    .prepare("select * from packs where activo = 1 order by orden asc")
-    .all() as Fila[];
+export async function getPacks(): Promise<Pack[]> {
+  const filas = await all<Fila>("select * from packs where activo = 1 order by orden asc");
   return filas.map(aPack);
 }
 
-export function getClientes(busqueda?: string): Cliente[] {
+export async function getClientes(busqueda?: string): Promise<Cliente[]> {
   let filas: Fila[];
   if (busqueda?.trim()) {
     const t = `%${busqueda.trim()}%`;
-    filas = db
-      .prepare(
-        `select * from clientes
-         where borrado_en is null
-           and (nombre like ? or telefono like ? or poblacion like ? or cif_nif like ?)
-         order by nombre collate nocase asc`
-      )
-      .all(t, t, t, t) as Fila[];
+    filas = await all<Fila>(
+      `select * from clientes
+       where borrado_en is null
+         and (nombre like ? or telefono like ? or poblacion like ? or cif_nif like ?)
+       order by nombre collate nocase asc`,
+      t,
+      t,
+      t,
+      t
+    );
   } else {
-    filas = db
-      .prepare("select * from clientes where borrado_en is null order by nombre collate nocase asc")
-      .all() as Fila[];
+    filas = await all<Fila>(
+      "select * from clientes where borrado_en is null order by nombre collate nocase asc"
+    );
   }
   return filas.map(aCliente);
 }
 
-export function getCliente(id: string): Cliente | null {
-  const f = db.prepare("select * from clientes where id = ?").get(id) as Fila | undefined;
+export async function getCliente(id: string): Promise<Cliente | null> {
+  const f = await get<Fila>("select * from clientes where id = ?", id);
   return f ? aCliente(f) : null;
 }
 
-export function getEventosRango(desde: string, hasta: string): EventoCompleto[] {
-  const filas = db.prepare(JUNTAR).all(desde, hasta) as Fila[];
-  return filas.map(completar);
+export async function getEventosRango(desde: string, hasta: string): Promise<EventoCompleto[]> {
+  const filas = await all<Fila>(JUNTAR, desde, hasta);
+  return Promise.all(filas.map(completar));
 }
 
-export function getEvento(id: string): EventoCompleto | null {
-  const f = db.prepare("select * from eventos where id = ?").get(id) as Fila | undefined;
+export async function getEvento(id: string): Promise<EventoCompleto | null> {
+  const f = await get<Fila>("select * from eventos where id = ?", id);
   return f ? completar(f) : null;
 }
 
-export function getEventos(opciones?: {
+export async function getEventos(opciones?: {
   estados?: EstadoEvento[];
   desde?: string;
   hasta?: string;
   limite?: number;
-}): EventoCompleto[] {
+}): Promise<EventoCompleto[]> {
   const conds: string[] = [];
-  const params: SQLInputValue[] = [];
+  const params: InValue[] = [];
   if (opciones?.estados?.length) {
     conds.push(`e.estado in (${opciones.estados.map(() => "?").join(",")})`);
     params.push(...opciones.estados);
@@ -250,30 +251,33 @@ export function getEventos(opciones?: {
     ` order by e.fecha desc` +
     (opciones?.limite ? ` limit ?` : "");
   if (opciones?.limite) params.push(opciones.limite);
-  const filas = db.prepare(sql).all(...params) as Fila[];
-  return filas.map(completar);
+  const filas = await all<Fila>(sql, ...params);
+  return Promise.all(filas.map(completar));
 }
 
-export function getProximosEventos(limite = 6, desde: string): EventoCompleto[] {
-  const filas = db
-    .prepare(
-      `select e.* from eventos e
-       where e.fecha >= ? and e.estado != 'cancelado'
-       order by e.fecha asc
-       limit ?`
-    )
-    .all(desde, limite) as Fila[];
-  return filas.map(completar);
+export async function getProximosEventos(limite = 6, desde: string): Promise<EventoCompleto[]> {
+  const filas = await all<Fila>(
+    `select e.* from eventos e
+     where e.fecha >= ? and e.estado != 'cancelado'
+     order by e.fecha asc
+     limit ?`,
+    desde,
+    limite
+  );
+  return Promise.all(filas.map(completar));
 }
 
-export function getConteoEstados(desde: string, hasta: string): Record<EstadoEvento, number> {
-  const filas = db
-    .prepare(
-      `select estado, count(*) as n from eventos
-       where fecha >= ? and fecha <= ?
-       group by estado`
-    )
-    .all(desde, hasta) as Array<{ estado: string; n: number }>;
+export async function getConteoEstados(
+  desde: string,
+  hasta: string
+): Promise<Record<EstadoEvento, number>> {
+  const filas = await all<{ estado: string; n: number }>(
+    `select estado, count(*) as n from eventos
+     where fecha >= ? and fecha <= ?
+     group by estado`,
+    desde,
+    hasta
+  );
   const acc: Record<EstadoEvento, number> = {
     borrador: 0,
     confirmado: 0,
@@ -319,63 +323,75 @@ export interface FilaEvento {
 }
 
 /** Inserta o actualiza un evento y reemplaza sus líneas (recalcula el importe). */
-export function guardarEvento(fila: FilaEvento, lineas: LineaEntrada[]): { id: string } {
+export async function guardarEvento(
+  fila: FilaEvento,
+  lineas: LineaEntrada[]
+): Promise<{ id: string }> {
   const id = fila.id ?? randomUUID();
   const importe = lineas.reduce((s, l) => s + l.cantidad * l.precio_unitario, 0);
   const ahora = new Date().toISOString();
 
+  const sentencias: Array<{ sql: string; args: InValue[] }> = [];
+
   if (fila.id) {
-    db.prepare(
-      `update eventos set
-         cliente_id = ?, titulo = ?, tipo = ?, estado = ?, fecha = ?,
-         hora_salida = ?, hora_montaje = ?, hora_inicio = ?, hora_fin = ?,
-         direccion = ?, poblacion = ?, provincia = ?, zona = ?, duracion_horas = ?,
-         notas = ?, importe_total = ?, actualizado_en = ?
-       where id = ?`
-    ).run(
-      fila.cliente_id, fila.titulo, fila.tipo, fila.estado, fila.fecha,
-      fila.hora_salida, fila.hora_montaje, fila.hora_inicio, fila.hora_fin,
-      fila.direccion, fila.poblacion, fila.provincia, fila.zona, fila.duracion_horas,
-      fila.notas, importe, ahora, id
-    );
-    db.prepare("delete from evento_lineas where evento_id = ?").run(id);
+    sentencias.push({
+      sql: `update eventos set
+              cliente_id = ?, titulo = ?, tipo = ?, estado = ?, fecha = ?,
+              hora_salida = ?, hora_montaje = ?, hora_inicio = ?, hora_fin = ?,
+              direccion = ?, poblacion = ?, provincia = ?, zona = ?, duracion_horas = ?,
+              notas = ?, importe_total = ?, actualizado_en = ?
+            where id = ?`,
+      args: [
+        fila.cliente_id, fila.titulo, fila.tipo, fila.estado, fila.fecha,
+        fila.hora_salida, fila.hora_montaje, fila.hora_inicio, fila.hora_fin,
+        fila.direccion, fila.poblacion, fila.provincia, fila.zona, fila.duracion_horas,
+        fila.notas, importe, ahora, id,
+      ],
+    });
+    sentencias.push({
+      sql: "delete from evento_lineas where evento_id = ?",
+      args: [id],
+    });
   } else {
-    db.prepare(
-      `insert into eventos
-         (id, cliente_id, titulo, tipo, estado, fecha,
-          hora_salida, hora_montaje, hora_inicio, hora_fin,
-          direccion, poblacion, provincia, zona, duracion_horas,
-          notas, importe_total, creado_en, actualizado_en)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      id, fila.cliente_id, fila.titulo, fila.tipo, fila.estado, fila.fecha,
-      fila.hora_salida, fila.hora_montaje, fila.hora_inicio, fila.hora_fin,
-      fila.direccion, fila.poblacion, fila.provincia, fila.zona, fila.duracion_horas,
-      fila.notas, importe, ahora, ahora
-    );
+    sentencias.push({
+      sql: `insert into eventos
+              (id, cliente_id, titulo, tipo, estado, fecha,
+               hora_salida, hora_montaje, hora_inicio, hora_fin,
+               direccion, poblacion, provincia, zona, duracion_horas,
+               notas, importe_total, creado_en, actualizado_en)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        id, fila.cliente_id, fila.titulo, fila.tipo, fila.estado, fila.fecha,
+        fila.hora_salida, fila.hora_montaje, fila.hora_inicio, fila.hora_fin,
+        fila.direccion, fila.poblacion, fila.provincia, fila.zona, fila.duracion_horas,
+        fila.notas, importe, ahora, ahora,
+      ],
+    });
   }
 
-  const insLinea = db.prepare(
-    `insert into evento_lineas (id, evento_id, atraccion_id, descripcion, cantidad, precio_unitario, orden)
-     values (?, ?, ?, ?, ?, ?, ?)`
-  );
   lineas.forEach((l, i) =>
-    insLinea.run(randomUUID(), id, l.atraccion_id, l.descripcion, l.cantidad, l.precio_unitario, i)
+    sentencias.push({
+      sql: `insert into evento_lineas (id, evento_id, atraccion_id, descripcion, cantidad, precio_unitario, orden)
+            values (?, ?, ?, ?, ?, ?, ?)`,
+      args: [randomUUID(), id, l.atraccion_id, l.descripcion, l.cantidad, l.precio_unitario, i],
+    })
   );
 
+  await batch(sentencias);
   return { id };
 }
 
-export function cambiarEstadoEvento(id: string, estado: string): void {
-  db.prepare("update eventos set estado = ?, actualizado_en = ? where id = ?").run(
+export async function cambiarEstadoEvento(id: string, estado: string): Promise<void> {
+  await run(
+    "update eventos set estado = ?, actualizado_en = ? where id = ?",
     estado,
     new Date().toISOString(),
     id
   );
 }
 
-export function borrarEvento(id: string): void {
-  db.prepare("delete from eventos where id = ?").run(id);
+export async function borrarEvento(id: string): Promise<void> {
+  await run("delete from eventos where id = ?", id);
 }
 
 export interface FilaCliente {
@@ -393,24 +409,22 @@ export interface FilaCliente {
   notas: string | null;
 }
 
-export function guardarCliente(fila: FilaCliente, id?: string | null): void {
+export async function guardarCliente(fila: FilaCliente, id?: string | null): Promise<void> {
   const ahora = new Date().toISOString();
   if (id) {
-    db.prepare(
+    await run(
       `update clientes set
          nombre = ?, tipo = ?, cif_nif = ?, email = ?, telefono = ?, direccion = ?,
          poblacion = ?, provincia = ?, cp = ?, retiene_irpf = ?, notas = ?
-       where id = ?`
-    ).run(
+       where id = ?`,
       fila.nombre, fila.tipo, fila.cif_nif, fila.email, fila.telefono, fila.direccion,
       fila.poblacion, fila.provincia, fila.cp, fila.retiene_irpf ? 1 : 0, fila.notas, id
     );
   } else {
-    db.prepare(
+    await run(
       `insert into clientes
          (id, nombre, tipo, cif_nif, email, telefono, direccion, poblacion, provincia, cp, retiene_irpf, notas, creado_en)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       randomUUID(), fila.nombre, fila.tipo, fila.cif_nif, fila.email, fila.telefono,
       fila.direccion, fila.poblacion, fila.provincia, fila.cp,
       fila.retiene_irpf ? 1 : 0, fila.notas, ahora
@@ -418,11 +432,8 @@ export function guardarCliente(fila: FilaCliente, id?: string | null): void {
   }
 }
 
-export function archivarCliente(id: string): void {
-  db.prepare("update clientes set borrado_en = ? where id = ?").run(
-    new Date().toISOString(),
-    id
-  );
+export async function archivarCliente(id: string): Promise<void> {
+  await run("update clientes set borrado_en = ? where id = ?", new Date().toISOString(), id);
 }
 
 export interface FilaAtraccion {
@@ -438,26 +449,24 @@ export interface FilaAtraccion {
   activa: boolean;
 }
 
-export function guardarAtraccion(fila: FilaAtraccion): void {
+export async function guardarAtraccion(fila: FilaAtraccion): Promise<void> {
   const id = fila.id ?? randomUUID();
   const ahora = new Date().toISOString();
   if (fila.id) {
-    db.prepare(
+    await run(
       `update atracciones set
          nombre = ?, slug = ?, categoria = ?, descripcion = ?, precio_base = ?,
          duracion_base = ?, incluida_en_packs = ?, orden = ?, activa = ?
-       where id = ?`
-    ).run(
+       where id = ?`,
       fila.nombre, fila.slug, fila.categoria, fila.descripcion, fila.precio_base,
       fila.duracion_base, fila.incluida_en_packs ? 1 : 0, fila.orden,
       fila.activa ? 1 : 0, id
     );
   } else {
-    db.prepare(
+    await run(
       `insert into atracciones
          (id, nombre, slug, categoria, descripcion, precio_base, duracion_base, incluida_en_packs, orden, activa, creado_en)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id, fila.nombre, fila.slug, fila.categoria, fila.descripcion, fila.precio_base,
       fila.duracion_base, fila.incluida_en_packs ? 1 : 0, fila.orden,
       fila.activa ? 1 : 0, ahora
@@ -465,8 +474,8 @@ export function guardarAtraccion(fila: FilaAtraccion): void {
   }
 }
 
-export function archivarAtraccion(id: string): void {
-  db.prepare("update atracciones set activa = 0 where id = ?").run(id);
+export async function archivarAtraccion(id: string): Promise<void> {
+  await run("update atracciones set activa = 0 where id = ?", id);
 }
 
 export interface FilaPack {
@@ -479,24 +488,26 @@ export interface FilaPack {
   activo: boolean;
 }
 
-export function guardarPack(fila: FilaPack): void {
+export async function guardarPack(fila: FilaPack): Promise<void> {
   const id = fila.id ?? randomUUID();
   const ahora = new Date().toISOString();
   const incluyeJson = JSON.stringify(fila.incluye);
   if (fila.id) {
-    db.prepare(
-      `update packs set nombre = ?, descripcion = ?, incluye = ?, precio_base = ?, orden = ?, activo = ? where id = ?`
-    ).run(fila.nombre, fila.descripcion, incluyeJson, fila.precio_base, fila.orden, fila.activo ? 1 : 0, id);
+    await run(
+      `update packs set nombre = ?, descripcion = ?, incluye = ?, precio_base = ?, orden = ?, activo = ? where id = ?`,
+      fila.nombre, fila.descripcion, incluyeJson, fila.precio_base, fila.orden, fila.activo ? 1 : 0, id
+    );
   } else {
-    db.prepare(
+    await run(
       `insert into packs (id, nombre, descripcion, incluye, precio_base, orden, activo, creado_en)
-       values (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, fila.nombre, fila.descripcion, incluyeJson, fila.precio_base, fila.orden, fila.activo ? 1 : 0, ahora);
+       values (?, ?, ?, ?, ?, ?, ?, ?)`,
+      id, fila.nombre, fila.descripcion, incluyeJson, fila.precio_base, fila.orden, fila.activo ? 1 : 0, ahora
+    );
   }
 }
 
-export function archivarPack(id: string): void {
-  db.prepare("update packs set activo = 0 where id = ?").run(id);
+export async function archivarPack(id: string): Promise<void> {
+  await run("update packs set activo = 0 where id = ?", id);
 }
 
 export interface FilaConfig {
@@ -515,14 +526,13 @@ export interface FilaConfig {
   suplemento_8h: number;
 }
 
-export function guardarConfiguracion(fila: FilaConfig): void {
-  db.prepare(
+export async function guardarConfiguracion(fila: FilaConfig): Promise<void> {
+  await run(
     `update empresa_config set
        nombre = ?, cif = ?, direccion = ?, poblacion = ?, provincia = ?,
        telefono = ?, email = ?, iban = ?, iva_defecto = ?, irpf_defecto = ?,
        serie_facturas = ?, suplemento_5h = ?, suplemento_8h = ?, actualizado_en = ?
-     where id = 1`
-  ).run(
+     where id = 1`,
     fila.nombre, fila.cif, fila.direccion, fila.poblacion, fila.provincia,
     fila.telefono, fila.email, fila.iban, fila.iva_defecto, fila.irpf_defecto,
     fila.serie_facturas, fila.suplemento_5h, fila.suplemento_8h, new Date().toISOString()
@@ -583,36 +593,38 @@ const aGastoRow = (f: Fila): Movimiento => ({
   referencia: (f.referencia as string) ?? null,
 });
 
-export function getCuentas(): Cuenta[] {
-  const filas = db
-    .prepare("select * from cuentas where activa = 1 order by tipo asc, nombre asc")
-    .all() as Fila[];
+export async function getCuentas(): Promise<Cuenta[]> {
+  const filas = await all<Fila>(
+    "select * from cuentas where activa = 1 order by tipo asc, nombre asc"
+  );
   return filas.map(aCuenta);
 }
 
 /** Saldo histórico total por cuenta y entradas/salidas del período. */
-export function getResumenTesoreria(desde: string, hasta: string): ResumenTesoreria {
-  const cuentas = getCuentas();
+export async function getResumenTesoreria(
+  desde: string,
+  hasta: string
+): Promise<ResumenTesoreria> {
+  const cuentas = await getCuentas();
 
-  const cobrosPeriodo = db
-    .prepare(
+  const [cobrosPeriodo, gastosPeriodo, cobrosTotal, gastosTotal] = await Promise.all([
+    all<{ cuenta_id: string; s: number }>(
       `select cuenta_id, coalesce(sum(importe), 0) as s from cobros
-       where fecha between ? and ? group by cuenta_id`
-    )
-    .all(desde, hasta) as Array<{ cuenta_id: string; s: number }>;
-  const gastosPeriodo = db
-    .prepare(
+       where fecha between ? and ? group by cuenta_id`,
+      desde, hasta
+    ),
+    all<{ cuenta_id: string; s: number }>(
       `select cuenta_id, coalesce(sum(importe), 0) as s from gastos
-       where fecha between ? and ? group by cuenta_id`
-    )
-    .all(desde, hasta) as Array<{ cuenta_id: string; s: number }>;
-
-  const cobrosTotal = db
-    .prepare(`select cuenta_id, coalesce(sum(importe), 0) as s from cobros group by cuenta_id`)
-    .all() as Array<{ cuenta_id: string; s: number }>;
-  const gastosTotal = db
-    .prepare(`select cuenta_id, coalesce(sum(importe), 0) as s from gastos group by cuenta_id`)
-    .all() as Array<{ cuenta_id: string; s: number }>;
+       where fecha between ? and ? group by cuenta_id`,
+      desde, hasta
+    ),
+    all<{ cuenta_id: string; s: number }>(
+      `select cuenta_id, coalesce(sum(importe), 0) as s from cobros group by cuenta_id`
+    ),
+    all<{ cuenta_id: string; s: number }>(
+      `select cuenta_id, coalesce(sum(importe), 0) as s from gastos group by cuenta_id`
+    ),
+  ]);
 
   const sumar = (arr: Array<{ cuenta_id: string; s: number }>) => arr.reduce((m, r) => {
     m[r.cuenta_id] = Number(r.s);
@@ -631,24 +643,24 @@ export function getResumenTesoreria(desde: string, hasta: string): ResumenTesore
     saldoTotal: cuenta.saldo_inicial + (ct[cuenta.id] ?? 0) - (gt[cuenta.id] ?? 0),
   }));
 
-  const filasCobros = db
-    .prepare(
+  const [filasCobros, filasGastos] = await Promise.all([
+    all<Fila>(
       `select ${COLUMNAS_COBRO}
        from cobros c
        left join cuentas cu on cu.id = c.cuenta_id
        left join eventos e on e.id = c.evento_id
        left join clientes cl on cl.id = c.cliente_id
-       where c.fecha between ? and ?`
-    )
-    .all(desde, hasta) as Fila[];
-  const filasGastos = db
-    .prepare(
+       where c.fecha between ? and ?`,
+      desde, hasta
+    ),
+    all<Fila>(
       `select ${COLUMNAS_GASTO}
        from gastos g
        left join cuentas cu on cu.id = g.cuenta_id
-       where g.fecha between ? and ?`
-    )
-    .all(desde, hasta) as Fila[];
+       where g.fecha between ? and ?`,
+      desde, hasta
+    ),
+  ]);
 
   const movimientos: Movimiento[] = [
     ...filasCobros.map(aCobroRow),
@@ -664,18 +676,17 @@ export function getResumenTesoreria(desde: string, hasta: string): ResumenTesore
 }
 
 /** Cobros registrados contra un evento (para calcular cobrado/pendiente). */
-export function getCobrosEvento(eventoId: string): Movimiento[] {
-  const filas = db
-    .prepare(
-      `select ${COLUMNAS_COBRO}
-       from cobros c
-       left join cuentas cu on cu.id = c.cuenta_id
-       left join eventos e on e.id = c.evento_id
-       left join clientes cl on cl.id = c.cliente_id
-       where c.evento_id = ?
-       order by c.fecha desc`
-    )
-    .all(eventoId) as Fila[];
+export async function getCobrosEvento(eventoId: string): Promise<Movimiento[]> {
+  const filas = await all<Fila>(
+    `select ${COLUMNAS_COBRO}
+     from cobros c
+     left join cuentas cu on cu.id = c.cuenta_id
+     left join eventos e on e.id = c.evento_id
+     left join clientes cl on cl.id = c.cliente_id
+     where c.evento_id = ?
+     order by c.fecha desc`,
+    eventoId
+  );
   return filas.map(aCobroRow);
 }
 
@@ -691,32 +702,30 @@ export interface FilaCobro {
   notas: string | null;
 }
 
-export function guardarCobro(fila: FilaCobro, id?: string | null): void {
+export async function guardarCobro(fila: FilaCobro, id?: string | null): Promise<void> {
   const ahora = new Date().toISOString();
   if (id) {
-    db.prepare(
+    await run(
       `update cobros set
          cuenta_id = ?, evento_id = ?, cliente_id = ?, concepto = ?, fecha = ?,
          importe = ?, metodo = ?, notas = ?
-       where id = ?`
-    ).run(
+       where id = ?`,
       fila.cuenta_id, fila.evento_id, fila.cliente_id, fila.concepto, fila.fecha,
       fila.importe, fila.metodo, fila.notas, id
     );
   } else {
-    db.prepare(
+    await run(
       `insert into cobros
          (id, cuenta_id, evento_id, cliente_id, concepto, fecha, importe, metodo, notas, creado_en)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       randomUUID(), fila.cuenta_id, fila.evento_id, fila.cliente_id, fila.concepto,
       fila.fecha, fila.importe, fila.metodo, fila.notas, ahora
     );
   }
 }
 
-export function borrarCobro(id: string): void {
-  db.prepare("delete from cobros where id = ?").run(id);
+export async function borrarCobro(id: string): Promise<void> {
+  await run("delete from cobros where id = ?", id);
 }
 
 export interface FilaGasto {
@@ -732,24 +741,22 @@ export interface FilaGasto {
   notas: string | null;
 }
 
-export function guardarGasto(fila: FilaGasto, id?: string | null): void {
+export async function guardarGasto(fila: FilaGasto, id?: string | null): Promise<void> {
   const ahora = new Date().toISOString();
   if (id) {
-    db.prepare(
+    await run(
       `update gastos set
          cuenta_id = ?, categoria = ?, concepto = ?, fecha = ?, importe = ?,
          proveedor = ?, metodo = ?, factura_ref = ?, notas = ?
-       where id = ?`
-    ).run(
+       where id = ?`,
       fila.cuenta_id, fila.categoria, fila.concepto, fila.fecha, fila.importe,
       fila.proveedor, fila.metodo, fila.factura_ref, fila.notas, id
     );
   } else {
-    db.prepare(
+    await run(
       `insert into gastos
          (id, cuenta_id, categoria, concepto, fecha, importe, proveedor, metodo, factura_ref, notas, creado_en)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       randomUUID(), fila.cuenta_id, fila.categoria, fila.concepto, fila.fecha,
       fila.importe, fila.proveedor, fila.metodo, fila.factura_ref, fila.notas, ahora
     );
@@ -787,18 +794,18 @@ function aGasto(f: Fila): Gasto {
   };
 }
 
-export function getCobro(id: string): Cobro | null {
-  const f = db.prepare("select * from cobros where id = ?").get(id) as Fila | undefined;
+export async function getCobro(id: string): Promise<Cobro | null> {
+  const f = await get<Fila>("select * from cobros where id = ?", id);
   return f ? aCobro(f) : null;
 }
 
-export function getGasto(id: string): Gasto | null {
-  const f = db.prepare("select * from gastos where id = ?").get(id) as Fila | undefined;
+export async function getGasto(id: string): Promise<Gasto | null> {
+  const f = await get<Fila>("select * from gastos where id = ?", id);
   return f ? aGasto(f) : null;
 }
 
-export function borrarGasto(id: string): void {
-  db.prepare("delete from gastos where id = ?").run(id);
+export async function borrarGasto(id: string): Promise<void> {
+  await run("delete from gastos where id = ?", id);
 }
 
 // ------------------------------------------------------------
@@ -835,23 +842,20 @@ function aFacturaLinea(f: Fila): FacturaLinea {
   };
 }
 
-function completarFactura(f: Fila): FacturaCompleta {
+async function completarFactura(f: Fila): Promise<FacturaCompleta> {
   const factura = aFactura(f);
 
   const lineas = (
-    db
-      .prepare("select * from factura_lineas where factura_id = ? order by orden asc")
-      .all(factura.id) as Fila[]
+    await all<Fila>("select * from factura_lineas where factura_id = ? order by orden asc", factura.id)
   ).map(aFacturaLinea);
 
   let cliente: FacturaCompleta["cliente"] = null;
   if (factura.cliente_id) {
-    const c = db
-      .prepare(
-        `select id, nombre, tipo, cif_nif, direccion, poblacion, provincia, cp, retiene_irpf
-         from clientes where id = ?`
-      )
-      .get(factura.cliente_id) as Fila | undefined;
+    const c = await get<Fila>(
+      `select id, nombre, tipo, cif_nif, direccion, poblacion, provincia, cp, retiene_irpf
+       from clientes where id = ?`,
+      factura.cliente_id
+    );
     if (c) {
       cliente = {
         id: String(c.id),
@@ -869,9 +873,10 @@ function completarFactura(f: Fila): FacturaCompleta {
 
   let evento: FacturaCompleta["evento"] = null;
   if (factura.evento_id) {
-    const e = db
-      .prepare("select id, titulo, fecha from eventos where id = ?")
-      .get(factura.evento_id) as Fila | undefined;
+    const e = await get<Fila>(
+      "select id, titulo, fecha from eventos where id = ?",
+      factura.evento_id
+    );
     if (e) {
       evento = { id: String(e.id), titulo: String(e.titulo), fecha: String(e.fecha) };
     }
@@ -880,28 +885,27 @@ function completarFactura(f: Fila): FacturaCompleta {
   return { ...factura, cliente, evento, factura_lineas: lineas };
 }
 
-export function getFacturas(desde: string, hasta: string): FacturaCompleta[] {
-  const filas = db
-    .prepare(
-      "select * from facturas where fecha between ? and ? order by fecha desc, numero desc"
-    )
-    .all(desde, hasta) as Fila[];
-  return filas.map(completarFactura);
+export async function getFacturas(desde: string, hasta: string): Promise<FacturaCompleta[]> {
+  const filas = await all<Fila>(
+    "select * from facturas where fecha between ? and ? order by fecha desc, numero desc",
+    desde,
+    hasta
+  );
+  return Promise.all(filas.map(completarFactura));
 }
 
-export function getFactura(id: string): FacturaCompleta | null {
-  const f = db.prepare("select * from facturas where id = ?").get(id) as Fila | undefined;
+export async function getFactura(id: string): Promise<FacturaCompleta | null> {
+  const f = await get<Fila>("select * from facturas where id = ?", id);
   return f ? completarFactura(f) : null;
 }
 
 /** Factura activa (no anulada) vinculada a un evento, si existe. */
-export function getFacturaEvento(eventoId: string): FacturaCompleta | null {
-  const f = db
-    .prepare(
-      `select * from facturas where evento_id = ? and estado != 'anulada'
-       order by fecha desc limit 1`
-    )
-    .get(eventoId) as Fila | undefined;
+export async function getFacturaEvento(eventoId: string): Promise<FacturaCompleta | null> {
+  const f = await get<Fila>(
+    `select * from facturas where evento_id = ? and estado != 'anulada'
+     order by fecha desc limit 1`,
+    eventoId
+  );
   return f ? completarFactura(f) : null;
 }
 
@@ -915,23 +919,20 @@ export interface NuevaFactura {
 }
 
 /** Crea la factura a partir de las líneas y el cliente del evento. Devuelve el id. */
-export function crearFacturaDesdeEvento(nueva: NuevaFactura): { id: string } {
-  const evento = db
-    .prepare("select * from eventos where id = ?")
-    .get(nueva.evento_id) as Fila | undefined;
+export async function crearFacturaDesdeEvento(nueva: NuevaFactura): Promise<{ id: string }> {
+  const evento = await get<Fila>("select * from eventos where id = ?", nueva.evento_id);
   if (!evento) throw new Error("No se encontró el evento.");
   const clienteId = evento.cliente_id ? String(evento.cliente_id) : null;
   const cliente = clienteId
-    ? (db.prepare("select * from clientes where id = ?").get(clienteId) as Fila | undefined)
-    : undefined;
+    ? await get<Fila>("select * from clientes where id = ?", clienteId)
+    : null;
   if (!cliente) throw new Error("El evento no tiene cliente asignado.");
 
-  const lineas = db
-    .prepare(
-      `select descripcion, cantidad, precio_unitario from evento_lineas
-       where evento_id = ? order by orden asc`
-    )
-    .all(nueva.evento_id) as Array<{ descripcion: string; cantidad: number; precio_unitario: number }>;
+  const lineas = await all<{ descripcion: string; cantidad: number; precio_unitario: number }>(
+    `select descripcion, cantidad, precio_unitario from evento_lineas
+     where evento_id = ? order by orden asc`,
+    nueva.evento_id
+  );
   const base = lineas.reduce((s, l) => s + Number(l.cantidad) * Number(l.precio_unitario), 0);
   if (base <= 0) throw new Error("El evento no tiene importes para facturar.");
 
@@ -943,38 +944,40 @@ export function crearFacturaDesdeEvento(nueva: NuevaFactura): { id: string } {
 
   const anio = Number(String(nueva.fecha).slice(0, 4)) || new Date().getFullYear();
   const numeros = (
-    db.prepare("select numero from facturas where serie = ?").all(nueva.serie) as Array<{
-      numero: string;
-    }>
+    await all<{ numero: string }>("select numero from facturas where serie = ?", nueva.serie)
   ).map((r) => r.numero);
   const numero = siguienteNumeroFactura(numeros, nueva.serie, anio);
 
   const id = randomUUID();
   const ahora = new Date().toISOString();
 
-  db.prepare(
-    `insert into facturas
-       (id, numero, serie, fecha, cliente_id, evento_id, estado,
-        base_imponible, iva, iva_importe, irpf, irpf_importe, total, notas, creado_en)
-     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    id, numero, nueva.serie, nueva.fecha, String(cliente.id), nueva.evento_id, nueva.estado,
-    base, nueva.iva, ivaImporte, irpfTasa, irpfImporte, total, null, ahora
-  );
+  const sentencias: Array<{ sql: string; args: InValue[] }> = [
+    {
+      sql: `insert into facturas
+              (id, numero, serie, fecha, cliente_id, evento_id, estado,
+               base_imponible, iva, iva_importe, irpf, irpf_importe, total, notas, creado_en)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        id, numero, nueva.serie, nueva.fecha, String(cliente.id), nueva.evento_id, nueva.estado,
+        base, nueva.iva, ivaImporte, irpfTasa, irpfImporte, total, null, ahora,
+      ],
+    },
+  ];
 
-  const insLinea = db.prepare(
-    `insert into factura_lineas (id, factura_id, descripcion, cantidad, precio_unitario, orden)
-     values (?, ?, ?, ?, ?, ?)`
-  );
   lineas.forEach((l, i) =>
-    insLinea.run(randomUUID(), id, String(l.descripcion), Number(l.cantidad), Number(l.precio_unitario), i)
+    sentencias.push({
+      sql: `insert into factura_lineas (id, factura_id, descripcion, cantidad, precio_unitario, orden)
+            values (?, ?, ?, ?, ?, ?)`,
+      args: [randomUUID(), id, String(l.descripcion), Number(l.cantidad), Number(l.precio_unitario), i],
+    })
   );
 
+  await batch(sentencias);
   return { id };
 }
 
-export function cambiarEstadoFactura(id: string, estado: string): void {
-  db.prepare("update facturas set estado = ? where id = ?").run(estado, id);
+export async function cambiarEstadoFactura(id: string, estado: string): Promise<void> {
+  await run("update facturas set estado = ? where id = ?", estado, id);
 }
 
 // ------------------------------------------------------------
@@ -998,17 +1001,15 @@ function aBien(f: Fila): BienInversion {
   };
 }
 
-export function getBienesInversion(): BienInversion[] {
-  const filas = db
-    .prepare("select * from bienes_inversion order by fecha_adquisicion desc, creado_en desc")
-    .all() as Fila[];
+export async function getBienesInversion(): Promise<BienInversion[]> {
+  const filas = await all<Fila>(
+    "select * from bienes_inversion order by fecha_adquisicion desc, creado_en desc"
+  );
   return filas.map(aBien);
 }
 
-export function getBienInversion(id: string): BienInversion | null {
-  const f = db
-    .prepare("select * from bienes_inversion where id = ?")
-    .get(id) as Fila | undefined;
+export async function getBienInversion(id: string): Promise<BienInversion | null> {
+  const f = await get<Fila>("select * from bienes_inversion where id = ?", id);
   return f ? aBien(f) : null;
 }
 
@@ -1024,15 +1025,14 @@ export interface NuevoBienInversion {
   observaciones: string | null;
 }
 
-export function crearBienInversion(nuevo: NuevoBienInversion): { id: string } {
+export async function crearBienInversion(nuevo: NuevoBienInversion): Promise<{ id: string }> {
   const id = randomUUID();
   const ahora = new Date().toISOString();
-  db.prepare(
+  await run(
     `insert into bienes_inversion
        (id, descripcion, numero_factura, fecha_adquisicion, valor_sin_iva, tipo_iva,
         iva_importe, tipo_bien, porcentaje_max, observaciones, creado_en, actualizado_en)
-     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
+     values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id, nuevo.descripcion, nuevo.numero_factura, nuevo.fecha_adquisicion,
     nuevo.valor_sin_iva, nuevo.tipo_iva, nuevo.iva_importe, nuevo.tipo_bien,
     nuevo.porcentaje_max, nuevo.observaciones, ahora, ahora
@@ -1040,14 +1040,16 @@ export function crearBienInversion(nuevo: NuevoBienInversion): { id: string } {
   return { id };
 }
 
-export function actualizarBienInversion(id: string, cambios: NuevoBienInversion): void {
-  db.prepare(
+export async function actualizarBienInversion(
+  id: string,
+  cambios: NuevoBienInversion
+): Promise<void> {
+  await run(
     `update bienes_inversion set
        descripcion = ?, numero_factura = ?, fecha_adquisicion = ?, valor_sin_iva = ?,
        tipo_iva = ?, iva_importe = ?, tipo_bien = ?, porcentaje_max = ?, observaciones = ?,
        actualizado_en = ?
-     where id = ?`
-  ).run(
+     where id = ?`,
     cambios.descripcion, cambios.numero_factura, cambios.fecha_adquisicion,
     cambios.valor_sin_iva, cambios.tipo_iva, cambios.iva_importe, cambios.tipo_bien,
     cambios.porcentaje_max, cambios.observaciones,
@@ -1055,6 +1057,6 @@ export function actualizarBienInversion(id: string, cambios: NuevoBienInversion)
   );
 }
 
-export function borrarBienInversion(id: string): void {
-  db.prepare("delete from bienes_inversion where id = ?").run(id);
+export async function borrarBienInversion(id: string): Promise<void> {
+  await run("delete from bienes_inversion where id = ?", id);
 }

@@ -3,13 +3,14 @@
 Aplicación privada de gestión para **Go Fun Eventos** (Almagro, Ciudad Real):
 calendario de eventos y gestión económica del negocio de alquiler de hinchables.
 
-- **Stack**: Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind CSS v4 + Supabase.
-- **Datos**: Supabase (Postgres) con seguridad RLS para el equipo autenticado.
+- **Stack**: Next.js 16 (App Router, Turbopack) + TypeScript + Tailwind CSS v4.
+- **Datos**: SQLite gestionado con **Turso (libSQL)** en producción. Es gratuito,
+  no se suspende por inactividad y funciona en serverless (conexión HTTP).
 - **Renderizado**: páginas dinámicas del lado del servidor (sesión obligatoria en todo el panel).
 
 ## Puesta en marcha
 
-### Opción A — Modo local (sin Supabase, ideal para probar ya)
+### Opción A — Desarrollo local (sin cuenta de Turso)
 
 La app arranca sin configuración y funciona con una **base SQLite local**
 (`data/gofun.db`, ignorada por git) y una sesión propia:
@@ -23,96 +24,87 @@ npm run dev
 - Abre [http://localhost:3000](http://localhost:3000) y entra con esas credenciales.
 - El catálogo y packs reales de la web se siembran automáticamente al primer arranque.
 
-Cuando quieras pasar a producción con el equipo, crea el proyecto de Supabase y
-rellena `.env.local` (opción B): la app detecta las credenciales y cambia a
-Supabase automáticamente sin tocar código.
+El esquema se crea solo (tablas + semilla) la primera vez que se usa la base.
 
-> El modo local es para desarrollo/pruebas. Para datos reales del negocio usa
-> Supabase (opción B), que tiene RLS y copias de seguridad.
+### Opción B — Turso (producción)
 
-### Opción B — Supabase (producción)
-
-### 1. Crear el proyecto de Supabase
-
-1. Crea un proyecto gratuito en [supabase.com](https://supabase.com/dashboard).
-2. Copia **Project URL** y **anon key** desde *Project Settings → API*.
-3. Rellena `.env.local` (copia desde `.env.example`):
+1. Crea una cuenta gratuita en [turso.tech](https://turso.tech).
+2. Instala la CLI y crea la base de datos:
 
    ```bash
-   cp .env.example .env.local
-   # y edita .env.local con tus credenciales reales
+   turso auth login
+   turso db create gofun
+   turso db show gofun --url          # TURSO_DATABASE_URL
+   turso db tokens create gofun       # TURSO_AUTH_TOKEN
    ```
 
-4. Ejecuta las migraciones de `supabase/migrations/` en el **SQL Editor**
-   de Supabase, en orden (`20261008120000_init.sql` → `20261008120001_tesoreria.sql`
-   → `20261008130000_facturacion.sql`). Crean las tablas, activan RLS e insertan el
-   catálogo real de la web y los packs.
-5. Crea un usuario del equipo en **Authentication → Users → Add user**.
+3. Copia `.env.example` a `.env.local` y rellena:
 
-Hasta que existan credenciales reales, la app muestra una pantalla de
-configuración en `/login`.
+   ```bash
+   TURSO_DATABASE_URL=libsql://gofun-tuusuario.turso.io
+   TURSO_AUTH_TOKEN=...
+   GOFUN_SESION_SECRET=una-cadena-larga-y-aleatoria
+   ```
 
-### 2. Instalar y arrancar
+4. Arranca (`npm run dev`) y entra con `admin` / `admin`. El esquema y el
+   catálogo se crean automáticamente en Turso en el primer acceso.
 
-```bash
-npm install
-npm run dev
-```
-
-Abre [http://localhost:3000](http://localhost:3000). El `proxy` redirige
-cualquier ruta privada sin sesión a `/login`.
+> Cambia la contraseña de `admin` desde la tabla `usuarios` (hash scrypt) o
+> añade usuarios nuevos antes de dar acceso al equipo.
 
 ## Despliegue en Netlify
 
 La app está preparada para Netlify (Next.js 16 con su runtime; `netlify.toml`
-y `.nvmrc` incluidos). Importante: en un serverless la base **SQLite local no es
-persistente**, así que en producción la app usa **Supabase** (Opción B) y el
-modo local queda solo para desarrollo.
+y `.nvmrc` incluidos). En serverless **no hay sistema de archivos persistente**,
+así que producción debe usar Turso.
 
-1. **Supabase**: crea el proyecto, ejecuta `supabase/migrations/*.sql` en el SQL
-   Editor (en orden: `20261008120000_init.sql` → `20261008120001_tesoreria.sql`
-   → `20261008130000_facturacion.sql`) y crea los usuarios del equipo en
-   *Authentication → Users*.
+1. **Turso**: crea la base y anota URL + token (ver Opción B).
 2. **Conecta el repo en Netlify** (*Add new site → Import an existing project*).
    Netlify detecta Next.js automáticamente (`npm run build` y `.next`) y respeta
    `.nvmrc` (Node 24).
 3. **Variables de entorno** en *Site → Configuration → Environment variables*:
-   - `NEXT_PUBLIC_SUPABASE_URL` · `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   
-   Al desplegar, la app detecta las credenciales y pasa automáticamente a modo
-   Supabase (las `NEXT_PUBLIC_*` se inyectan en el build; si cambian, hay que
-   lanzar un rebuild en *Deploys → Trigger deploy*).
+   - `TURSO_DATABASE_URL`
+   - `TURSO_AUTH_TOKEN`
+   - `GOFUN_SESION_SECRET`
+
+   Tras cambiarlas, lanza un rebuild en *Deploys → Trigger deploy*.
 
 ### Repo y despliegue automático
 
 El repo se renombró en GitHub de `contabilidadycalendario` a
 **`gofuneventos0/gofun-eventos-gestion`** (la URL antigua redirige automáticamente).
 El sitio de Netlify está conectado a este mismo repo y despliega la rama
-`development`. No hay que hacer nada especial: cada `git push origin development`
-sube el código y Netlify **redespliega solo**.
+`development`. Cada `git push origin development` sube el código y Netlify
+**redespliega solo**.
 
 ## Estructura
 
 ```
-supabase/migrations/        # SQL inicial (esquema + RLS + semilla)
 src/
-  proxy.ts                  # Protección de rutas y refresco de sesión (Next 16)
+  proxy.ts                  # Protección de rutas y sesión (Next 16)
   lib/
     types.ts                # Tipos de dominio
     constantes.ts           # Estados de evento, zonas, duraciones, catálogo
-    data.ts                 # Consultas (Server Components)
+    data.ts                 # Fachada de datos (re-exporta local/repo)
     format.ts               # Formato de fechas, horas y euros
-    supabase/               # Clientes de Supabase (server/client/proxy)
+    local/
+      db.ts                 # Cliente Turso/libSQL + esquema + semilla
+      repo.ts               # Consultas y mutaciones
+      auth.ts               # Usuarios y contraseñas
+      sesion.ts             # Cookie de sesión firmada (HMAC)
     actions/                # Server Actions (escriben en la BD)
   components/               # Shell, calendario, formularios, UI
   app/
     login/                  # Acceso del equipo
     (app)/                  # Panel, calendario, eventos, tesorería, facturación…
-    ```
+```
+
+> La carpeta `supabase/` se conserva como histórico de la primera versión; la
+> app ya no la usa ni necesita Supabase.
 
 ## Funcionalidad por fases
 
-- **F0 — Base**: proyecto, Supabase, login, shell y navegación.
+- **F0 — Base**: proyecto, base de datos, login, shell y navegación.
 - **F1 — Catálogo y eventos** ✅:
   - Calendario mensual por URL (`?mes=YYYY-MM`), con estado, dirección y horario de montaje.
   - Eventos con líneas (atracción × cantidad × precio), auto-precio según tarifa
@@ -139,6 +131,7 @@ src/
   - **Exportaciones CSV** ✅ (F4.1): libro de tesorería por mes, eventos y clientes
     desde sus listados, e informe fiscal por trimestre/año desde Facturación.
     Archivos compatibles con Excel/LibreOffice (`;`, decimales con coma, UTF-8).
+  - **Amortizaciones** ✅ (F4.2): bienes de inversión y tablas de amortización.
   - **PWA** (pendiente): instalable y con caché offline.
 
 ## Decisiones de fiscalidad

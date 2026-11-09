@@ -16,7 +16,7 @@ export default async function ConfiguracionPage() {
       {!config && (
         <div className="mb-4">
           <Aviso tono="error">
-            No se encontró la fila de configuración. Ejecuta la migración inicial en Supabase.
+            No se encontró la fila de configuración. Reinicia la app para crear el esquema.
           </Aviso>
         </div>
       )}

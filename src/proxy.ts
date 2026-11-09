@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { updateSession } from "@/lib/supabase/proxy";
+import { COOKIE_SESION, verificarToken } from "@/lib/local/sesion";
 
 /** Rutas públicas: raíz y login. Todo lo demás exige sesión. */
 const PUBLICOS = ["/", "/login"];
@@ -10,30 +10,25 @@ function esPublica(pathname: string): boolean {
 
 /**
  * Next.js 16: `middleware` se ha renombrado a `proxy`.
- * Refresca la sesión de Supabase y protege las rutas privadas.
+ * Verifica la cookie de sesión firmada (HMAC) y protege las rutas privadas.
  */
 export async function proxy(request: NextRequest) {
-  const { response, user, configurado } = await updateSession(request);
   const { pathname } = request.nextUrl;
 
-  // Sin credenciales: sólo dejamos ver la raíz y la página de login
-  // (que explica cómo configurar Supabase).
-  if (!configurado) {
-    if (esPublica(pathname)) return response;
-    return NextResponse.redirect(new URL("/login", request.url));
-  }
+  const token = request.cookies.get(COOKIE_SESION)?.value;
+  const userId = token ? await verificarToken(token) : null;
 
-  if (!user && !esPublica(pathname)) {
+  if (!userId && !esPublica(pathname)) {
     const url = new URL("/login", request.url);
     url.searchParams.set("desde", pathname);
     return NextResponse.redirect(url);
   }
 
-  if (user && (pathname === "/login" || pathname === "/")) {
+  if (userId && (pathname === "/login" || pathname === "/")) {
     return NextResponse.redirect(new URL("/panel", request.url));
   }
 
-  return response;
+  return NextResponse.next();
 }
 
 export const config = {

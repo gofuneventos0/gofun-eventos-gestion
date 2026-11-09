@@ -2,13 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
-import { esModoLocal } from "@/lib/supabase/env";
 import {
-  crearFacturaDesdeEvento as crearFacturaDesdeEventoLocal,
-  cambiarEstadoFactura as cambiarEstadoFacturaLocal,
+  crearFacturaDesdeEvento as crearFacturaDesdeEventoDb,
+  cambiarEstadoFactura as cambiarEstadoFacturaDb,
 } from "@/lib/local/repo";
-import { crearFacturaDesdeEvento as crearFacturaDesdeEventoSupabase } from "@/lib/data-supabase";
 import { getConfig, getFactura, getFacturaEvento } from "@/lib/data";
 import { requiereSesion } from "./utils";
 import { texto, type Resultado } from "./form";
@@ -41,41 +38,21 @@ export async function crearFactura(
   const iva = config?.iva_defecto || 21;
   const irpf = config?.irpf_defecto || 15;
 
-  if (esModoLocal()) {
-    // El redirect va FUERA del try/catch: redirect() lanza un error interno
-    // (NEXT_REDIRECT) que el catch no debe capturar.
-    let id: string;
-    try {
-      ({ id } = crearFacturaDesdeEventoLocal({ evento_id, fecha, estado, serie, iva, irpf }));
-    } catch (e) {
-      return {
-        ok: false,
-        mensaje: e instanceof Error ? e.message : "Error al generar la factura.",
-      };
-    }
-    revalidatePath("/facturacion");
-    revalidatePath(`/eventos/${evento_id}`);
-    redirect(`/facturacion/${id}`);
-  }
-
+  // El redirect va FUERA del try/catch: redirect() lanza un error interno
+  // (NEXT_REDIRECT) que el catch no debe capturar.
+  let id: string;
   try {
-    const { id } = await crearFacturaDesdeEventoSupabase({
-      evento_id,
-      fecha,
-      estado,
-      serie,
-      iva,
-      irpf,
-    });
-    revalidatePath("/facturacion");
-    revalidatePath(`/eventos/${evento_id}`);
-    redirect(`/facturacion/${id}`);
+    ({ id } = await crearFacturaDesdeEventoDb({ evento_id, fecha, estado, serie, iva, irpf }));
   } catch (e) {
     return {
       ok: false,
       mensaje: e instanceof Error ? e.message : "Error al generar la factura.",
     };
   }
+
+  revalidatePath("/facturacion");
+  revalidatePath(`/eventos/${evento_id}`);
+  redirect(`/facturacion/${id}`);
 }
 
 /** Emitir (proforma → emitida) o anular una factura. */
@@ -91,23 +68,15 @@ export async function cambiarEstadoFactura(
 
   const eventoId = (await getFactura(id))?.evento_id ?? null;
 
-  if (esModoLocal()) {
-    try {
-      cambiarEstadoFacturaLocal(id, estado);
-    } catch (e) {
-      return {
-        ok: false,
-        mensaje: e instanceof Error ? e.message : "Error al actualizar la factura.",
-      };
-    }
-    revalidar(eventoId);
-    revalidatePath(`/facturacion/${id}`);
-    return { ok: true, mensaje: "Factura actualizada." };
+  try {
+    await cambiarEstadoFacturaDb(id, estado);
+  } catch (e) {
+    return {
+      ok: false,
+      mensaje: e instanceof Error ? e.message : "Error al actualizar la factura.",
+    };
   }
 
-  const supabase = await createClient();
-  const { error } = await supabase.from("facturas").update({ estado }).eq("id", id);
-  if (error) return { ok: false, mensaje: error.message };
   revalidar(eventoId);
   revalidatePath(`/facturacion/${id}`);
   return { ok: true, mensaje: "Factura actualizada." };

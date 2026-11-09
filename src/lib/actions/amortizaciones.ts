@@ -2,17 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { esModoLocal } from "@/lib/supabase/env";
 import {
-  crearBienInversion as crearBienInversionLocal,
-  actualizarBienInversion as actualizarBienInversionLocal,
-  borrarBienInversion as borrarBienInversionLocal,
+  crearBienInversion as crearBienInversionDb,
+  actualizarBienInversion as actualizarBienInversionDb,
+  borrarBienInversion as borrarBienInversionDb,
 } from "@/lib/local/repo";
-import {
-  crearBienInversion as crearBienInversionSupabase,
-  actualizarBienInversion as actualizarBienInversionSupabase,
-  borrarBienInversion as borrarBienInversionSupabase,
-} from "@/lib/data-supabase";
 import { porcentajeTipoBien, TIPOS_BIEN_INVERSION, TIPOS_IVA_BIEN } from "@/lib/constantes";
 import { requiereSesion } from "./utils";
 import { numero, texto, type Resultado } from "./form";
@@ -38,7 +32,7 @@ function leerDatos(formData: FormData): { error: string } | { dato: DatosBien } 
   const descripcion = texto(formData, "descripcion");
   const fecha = texto(formData, "fecha_adquisicion");
   const tipoRaw = texto(formData, "tipo_bien");
-  const tipoValido = TIPOS_BIEN_INVERSION .some((t) => t.valor === tipoRaw);
+  const tipoValido = TIPOS_BIEN_INVERSION.some((t) => t.valor === tipoRaw);
   const tipoBien: TipoBienInversion | null = tipoValido ? (tipoRaw as TipoBienInversion) : null;
   if (!descripcion) return { error: "La descripción del bien es obligatoria." };
   if (!fecha) return { error: "La fecha de adquisición es obligatoria." };
@@ -76,24 +70,15 @@ export async function crearBien(
   const resultado = leerDatos(formData);
   if ("error" in resultado) return { ok: false, mensaje: resultado.error };
 
-  if (esModoLocal()) {
-    let id: string;
-    try {
-      ({ id } = crearBienInversionLocal(resultado.dato));
-    } catch (e) {
-      return { ok: false, mensaje: e instanceof Error ? e.message : "Error al guardar el bien." };
-    }
-    revalidatePath("/amortizaciones");
-    redirect(`/amortizaciones/${id}`);
-  }
-
+  let id: string;
   try {
-    const { id } = await crearBienInversionSupabase(resultado.dato);
-    revalidatePath("/amortizaciones");
-    redirect(`/amortizaciones/${id}`);
+    ({ id } = await crearBienInversionDb(resultado.dato));
   } catch (e) {
     return { ok: false, mensaje: e instanceof Error ? e.message : "Error al guardar el bien." };
   }
+
+  revalidatePath("/amortizaciones");
+  redirect(`/amortizaciones/${id}`);
 }
 
 export async function actualizarBien(
@@ -106,45 +91,27 @@ export async function actualizarBien(
   const resultado = leerDatos(formData);
   if ("error" in resultado) return { ok: false, mensaje: resultado.error };
 
-  if (esModoLocal()) {
-    try {
-      actualizarBienInversionLocal(id, resultado.dato);
-    } catch (e) {
-      return { ok: false, mensaje: e instanceof Error ? e.message : "Error al guardar el bien." };
-    }
-    revalidar(id);
-    return { ok: true, mensaje: "Bien actualizado." };
-  }
-
   try {
-    await actualizarBienInversionSupabase(id, resultado.dato);
-    revalidar(id);
-    return { ok: true, mensaje: "Bien actualizado." };
+    await actualizarBienInversionDb(id, resultado.dato);
   } catch (e) {
     return { ok: false, mensaje: e instanceof Error ? e.message : "Error al guardar el bien." };
   }
+
+  revalidar(id);
+  return { ok: true, mensaje: "Bien actualizado." };
 }
 
 export async function borrarBien(id: string): Promise<Resultado> {
   await requiereSesion();
 
-  if (esModoLocal()) {
-    try {
-      borrarBienInversionLocal(id);
-    } catch (e) {
-      return { ok: false, mensaje: e instanceof Error ? e.message : "No se pudo borrar el bien." };
-    }
-    revalidar();
-    return { ok: true, mensaje: "Bien eliminado." };
-  }
-
   try {
-    await borrarBienInversionSupabase(id);
-    revalidar();
-    return { ok: true, mensaje: "Bien eliminado." };
+    await borrarBienInversionDb(id);
   } catch (e) {
     return { ok: false, mensaje: e instanceof Error ? e.message : "No se pudo borrar el bien." };
   }
+
+  revalidar();
+  return { ok: true, mensaje: "Bien eliminado." };
 }
 
 function revalidar(id?: string) {

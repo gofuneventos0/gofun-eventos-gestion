@@ -1,4 +1,4 @@
-import { getSessionUser } from "@/lib/supabase/server";
+import { getSessionUser } from "@/lib/local/sesion-servidor";
 import Shell from "@/components/shell";
 
 export default async function AppLayout({ children }: LayoutProps<"/">) {

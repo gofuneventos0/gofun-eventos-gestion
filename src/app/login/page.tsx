@@ -1,10 +1,10 @@
-import { esModoLocal } from "@/lib/supabase/env";
+import { usandoTurso } from "@/lib/local/db";
 import FormularioLogin from "./formulario";
 
 export const metadata = { title: "Acceso" };
 
 export default async function LoginPage(props: PageProps<"/login">) {
-  const local = esModoLocal();
+  const local = !usandoTurso;
   const sp = await props.searchParams;
   const desde = typeof sp.desde === "string" ? sp.desde : "/panel";
 
@@ -33,11 +33,10 @@ export default async function LoginPage(props: PageProps<"/login">) {
 
         {local && (
           <p className="mt-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs leading-relaxed text-slate-400">
-            <span className="font-semibold text-marca-400">Modo local</span> · usuario{" "}
-            <code className="rounded bg-black/40 px-1 py-0.5">admin</code> y contraseña{" "}
-            <code className="rounded bg-black/40 px-1 py-0.5">admin</code>. Cuando añadas las
-            credenciales de Supabase en <code className="rounded bg-black/40 px-1 py-0.5">.env.local</code>{" "}
-            y reinicies, el equipo entrará con su propia cuenta (ver README).
+            <span className="font-semibold text-marca-400">Desarrollo</span> · base de datos local
+            con usuario <code className="rounded bg-black/40 px-1 py-0.5">admin</code> y contraseña{" "}
+            <code className="rounded bg-black/40 px-1 py-0.5">admin</code>. En producción los
+            datos viven en Turso (ver README).
           </p>
         )}
 
