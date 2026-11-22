@@ -4,7 +4,6 @@ import { format } from "date-fns";
 import { Download, HandCoins, Landmark, PlusCircle, Wallet } from "lucide-react";
 import {
   getCobro,
-  getCuentas,
   getEventos,
   getGasto,
   getResumenTesoreria,
@@ -24,6 +23,14 @@ import MovimientoFila from "@/components/movimiento-fila";
 
 export const metadata = { title: "Tesorería" };
 
+/** Solo se necesita al abrir un formulario; en la vista normal evita 300 eventos. */
+async function opcionesEventos() {
+  const eventos = await getEventos({ limite: 300 });
+  return eventos
+    .map((e) => ({ id: e.id, titulo: e.titulo, fecha: e.fecha }))
+    .sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
+}
+
 export default async function TesoreriaPage(props: PageProps<"/tesoreria">) {
   const sp = await props.searchParams;
   const accion = sp.accion === "cobro" || sp.accion === "gasto" ? sp.accion : null;
@@ -41,18 +48,16 @@ export default async function TesoreriaPage(props: PageProps<"/tesoreria">) {
   const hasta = `${mesRaw}-${String(ultimoDia).padStart(2, "0")}`;
   const etiquetaMes = format(new Date(Date.UTC(anio, mes - 1, 1)), "LLLL yyyy", { locale: es });
 
-  const [cuentas, resumen, eventos] = await Promise.all([
-    getCuentas(),
-    getResumenTesoreria(desde, hasta),
-    getEventos({ limite: 300 }),
-  ]);
-
-  const opcionesEventos = eventos
-    .map((e) => ({ id: e.id, titulo: e.titulo, fecha: e.fecha }))
-    .sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
+  const resumen = await getResumenTesoreria(desde, hasta);
+  // El resumen ya trae las cuentas: no repetimos la consulta.
+  const cuentas = resumen.cuentas.map((s) => s.cuenta);
 
   if (editar) {
-    const [cobro, gasto] = await Promise.all([getCobro(editar), getGasto(editar)]);
+    const [cobro, gasto, opciones] = await Promise.all([
+      getCobro(editar),
+      getGasto(editar),
+      opcionesEventos(),
+    ]);
     const tipo = cobro ? "cobro" : gasto ? "gasto" : null;
     if (!tipo) {
       return (
@@ -66,18 +71,19 @@ export default async function TesoreriaPage(props: PageProps<"/tesoreria">) {
         tipo={tipo}
         fila={cobro ?? gasto}
         cuentas={cuentas}
-        eventos={opcionesEventos}
+        eventos={opciones}
       />
     );
   }
 
   if (accion) {
+    const opciones = await opcionesEventos();
     return (
       <TesoreriaForm
         tipo={accion}
         fila={null}
         cuentas={cuentas}
-        eventos={opcionesEventos}
+        eventos={opciones}
         eventoDefecto={eventoDefecto}
       />
     );
