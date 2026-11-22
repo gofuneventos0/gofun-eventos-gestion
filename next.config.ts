@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  experimental: {
+    agentUpgrade: "security",
+  },
   // Esta app es privada y 100% dependiente de la sesión: todas las páginas
   // leen cookies y datos que cambian en cada petición, así que no hay nada que
   // prerenderizar. Se desactiva Cache Components (y Partial Prefetching, que lo
