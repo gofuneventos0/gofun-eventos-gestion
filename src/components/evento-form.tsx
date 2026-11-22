@@ -4,7 +4,7 @@ import { useMemo, useState, useActionState } from "react";
 import Link from "next/link";
 import { Plus, Trash2 } from "lucide-react";
 import { guardarEvento } from "@/lib/actions/eventos";
-import type { Atraccion, Cliente, DuracionEvento, EventoCompleto } from "@/lib/types";
+import type { Atraccion, DuracionEvento, EventoCompleto } from "@/lib/types";
 import {
   CATEGORIAS,
   DURACIONES,
@@ -15,7 +15,6 @@ import {
   labelCategoria,
 } from "@/lib/constantes";
 import { euros, hoyISO } from "@/lib/format";
-import { moduloVisible } from "@/lib/modulos";
 import { Aviso, Campo, CLASE_BOTON, CLASE_BOTON_MARCA, CLASE_BOTON_SUAVE, CLASE_INPUT } from "@/components/ui";
 import BotonEnviar from "@/components/boton-enviar";
 
@@ -40,13 +39,11 @@ function nuevaLinea(): Linea {
 }
 
 export default function EventoForm({
-  clientes,
   atracciones,
   evento,
   fechaInicial,
   suplementos,
 }: {
-  clientes: Cliente[];
   atracciones: Atraccion[];
   evento?: EventoCompleto | null;
   fechaInicial?: string;
@@ -142,23 +139,15 @@ export default function EventoForm({
           </Campo>
 
           <Campo label="Cliente">
-            <select name="cliente_id" defaultValue={evento?.cliente_id ?? ""} className={CLASE_INPUT}>
-              <option value="">— Sin cliente —</option>
-              {clientes.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nombre}
-                  {c.poblacion ? ` · ${c.poblacion}` : ""}
-                </option>
-              ))}
-            </select>
-            {moduloVisible("/clientes") && (
-              <span className="mt-1 block text-xs text-tinta-600">
-                ¿Cliente nuevo?{" "}
-                <Link href="/clientes" className="font-medium text-marca-600 underline">
-                  Créalo en Clientes
-                </Link>
-              </span>
-            )}
+            <input
+              name="cliente"
+              defaultValue={evento?.cliente?.nombre ?? ""}
+              placeholder="Nombre del cliente"
+              className={CLASE_INPUT}
+            />
+            <span className="mt-1 block text-xs text-tinta-600">
+              Escribe el nombre; si ya existe se reutiliza.
+            </span>
           </Campo>
 
           <Campo label="Tipo de evento">

@@ -1,4 +1,4 @@
-import { getAtracciones, getClientes, getConfig } from "@/lib/data";
+import { getAtracciones, getConfig } from "@/lib/data";
 import EventoForm from "@/components/evento-form";
 import { EncabezadoPagina } from "@/components/ui";
 
@@ -8,8 +8,7 @@ export default async function NuevoEventoPage(props: PageProps<"/eventos/nuevo">
   const sp = await props.searchParams;
   const fecha = typeof sp.fecha === "string" ? sp.fecha : undefined;
 
-  const [clientes, atracciones, config] = await Promise.all([
-    getClientes(),
+  const [atracciones, config] = await Promise.all([
     getAtracciones(),
     getConfig(),
   ]);
@@ -21,7 +20,6 @@ export default async function NuevoEventoPage(props: PageProps<"/eventos/nuevo">
         descripcion="Registra la reserva, el montaje y el importe contratado"
       />
       <EventoForm
-        clientes={clientes}
         atracciones={atracciones}
         fechaInicial={fecha}
         suplementos={{

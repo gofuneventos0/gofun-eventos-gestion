@@ -6,6 +6,7 @@ import {
   guardarEvento as guardarEventoDb,
   cambiarEstadoEvento as cambiarEstadoEventoDb,
   borrarEvento as borrarEventoDb,
+  idClientePorNombre,
 } from "@/lib/local/repo";
 import type { EstadoEvento } from "@/lib/types";
 import { requiereSesion } from "./utils";
@@ -49,9 +50,12 @@ export async function guardarEvento(
   if (!titulo) return { ok: false, mensaje: "El título es obligatorio." };
   if (!fecha) return { ok: false, mensaje: "La fecha es obligatoria." };
 
+  const nombreCliente = texto(formData, "cliente");
+  const clienteId = nombreCliente ? await idClientePorNombre(nombreCliente) : null;
+
   const fila = {
     id,
-    cliente_id: texto(formData, "cliente_id"),
+    cliente_id: clienteId,
     titulo,
     tipo: texto(formData, "tipo") ?? "particular",
     estado: (texto(formData, "estado") ?? "borrador") as EstadoEvento,
@@ -86,6 +90,7 @@ export async function guardarEvento(
   revalidatePath("/calendario");
   revalidatePath("/eventos");
   revalidatePath("/panel");
+  revalidatePath("/clientes");
   revalidatePath(`/eventos/${nuevoId}`);
   redirect(`/eventos/${nuevoId}`);
 }

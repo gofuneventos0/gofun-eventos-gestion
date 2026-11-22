@@ -284,6 +284,31 @@ export async function getCliente(id: string): Promise<Cliente | null> {
   return f ? aCliente(f) : null;
 }
 
+/**
+ * El formulario de eventos usa un campo de texto libre. Reutilizamos el
+ * cliente con el mismo nombre (si ya existe) o lo creamos internamente para
+ * no romper facturas ni el histórico de eventos.
+ */
+export async function idClientePorNombre(nombre: string): Promise<string> {
+  const limpio = nombre.trim();
+  const existente = await get<{ id: string }>(
+    `select id from clientes
+     where borrado_en is null and lower(trim(nombre)) = lower(?)
+     order by creado_en asc limit 1`,
+    limpio
+  );
+  if (existente) return String(existente.id);
+
+  const id = randomUUID();
+  await run(
+    "insert into clientes (id, nombre, creado_en) values (?, ?, ?)",
+    id,
+    limpio,
+    new Date().toISOString()
+  );
+  return id;
+}
+
 export async function getEventosRango(desde: string, hasta: string): Promise<EventoCompleto[]> {
   const filas = await all<Fila>(JUNTAR, desde, hasta);
   return completarVarios(filas);
