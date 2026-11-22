@@ -3,6 +3,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   experimental: {
     agentUpgrade: "security",
+    // Reutiliza el payload RSC en el router del cliente durante 30 s. Las
+    // acciones ya llaman a revalidatePath, así que los cambios se invalidan.
+    staleTimes: { dynamic: 30, static: 180 },
   },
   // Esta app es privada y 100% dependiente de la sesión: todas las páginas
   // leen cookies y datos que cambian en cada petición, así que no hay nada que
