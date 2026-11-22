@@ -15,7 +15,7 @@ interface FilaUsuario {
   creado_en: string;
 }
 
-function aUsuario(f: FilaUsuario): UsuarioLocal {
+function aUsuario(f: Pick<FilaUsuario, "id" | "email" | "nombre">): UsuarioLocal {
   return { id: f.id, email: f.email, nombre: f.nombre };
 }
 
@@ -28,7 +28,10 @@ export async function obtenerUsuarioPorEmail(email: string): Promise<FilaUsuario
 }
 
 export async function obtenerUsuarioPorId(id: string): Promise<UsuarioLocal | null> {
-  const fila = await get<FilaUsuario>("select * from usuarios where id = ?", id);
+  const fila = await get<Pick<FilaUsuario, "id" | "email" | "nombre">>(
+    "select id, email, nombre from usuarios where id = ?",
+    id
+  );
   return fila ? aUsuario(fila) : null;
 }
 
