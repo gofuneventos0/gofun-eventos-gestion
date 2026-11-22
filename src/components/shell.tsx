@@ -34,10 +34,10 @@ const NAV = [
 
 export default function Shell({
   children,
-  email,
+  correo,
 }: {
   children: React.ReactNode;
-  email: string | null;
+  correo: React.ReactNode;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -93,7 +93,7 @@ export default function Shell({
         {marca}
         {nav}
         <div className="border-t border-white/5 p-4">
-          <p className="truncate text-xs text-slate-500">{email ?? "Sesión activa"}</p>
+          <p className="truncate text-xs text-slate-500">{correo}</p>
           <button
             onClick={salir}
             className="mt-2 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-400 transition hover:bg-white/5 hover:text-white"
