@@ -32,7 +32,15 @@ function Dato({ etiqueta, valor }: { etiqueta: string; valor: React.ReactNode })
 
 export default async function EventoPage(props: PageProps<"/eventos/[id]">) {
   const { id } = await props.params;
-  const evento = await getEvento(id);
+
+  // Si los módulos están ocultos, tampoco consultamos sus datos: es donde se
+  // nota la mejora de velocidad al abrir el detalle de un evento.
+  const mostrarFinanzas = moduloVisible("/facturacion") || moduloVisible("/tesoreria");
+  const [evento, cobros, factura] = await Promise.all([
+    getEvento(id),
+    mostrarFinanzas ? getCobrosEvento(id) : Promise.resolve<Movimiento[]>([]),
+    mostrarFinanzas ? getFacturaEvento(id) : Promise.resolve<FacturaCompleta | null>(null),
+  ]);
   if (!evento) notFound();
 
   const totalLineas = evento.evento_lineas
@@ -41,13 +49,6 @@ export default async function EventoPage(props: PageProps<"/eventos/[id]">) {
     .reduce((s, l) => s + l.cantidad * Number(l.precio_unitario), 0);
 
   const importeRef = Number(evento.importe_total) > 0 ? Number(evento.importe_total) : totalLineas;
-
-  // Si los módulos están ocultos, tampoco consultamos sus datos: es donde se
-  // nota la mejora de velocidad al abrir el detalle de un evento.
-  const mostrarFinanzas = moduloVisible("/facturacion") || moduloVisible("/tesoreria");
-  const [cobros, factura]: [Movimiento[], FacturaCompleta | null] = mostrarFinanzas
-    ? await Promise.all([getCobrosEvento(id), getFacturaEvento(id)])
-    : [[], null];
   const cobrado = cobros.reduce((s, c) => s + c.importe, 0);
   const pendiente = Math.max(0, importeRef - cobrado);
   const pctCobrado = importeRef > 0 ? Math.min(100, Math.round((cobrado / importeRef) * 100)) : 0;
