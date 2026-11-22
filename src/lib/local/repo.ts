@@ -911,47 +911,96 @@ function aFacturaLinea(f: Fila): FacturaLinea {
   };
 }
 
+function clienteFactura(c: Fila): NonNullable<FacturaCompleta["cliente"]> {
+  return {
+    id: String(c.id),
+    nombre: String(c.nombre),
+    tipo: c.tipo as Cliente["tipo"],
+    cif_nif: (c.cif_nif as string) ?? null,
+    direccion: (c.direccion as string) ?? null,
+    poblacion: (c.poblacion as string) ?? null,
+    provincia: (c.provincia as string) ?? null,
+    cp: (c.cp as string) ?? null,
+    retiene_irpf: bool(c.retiene_irpf as number),
+  };
+}
+
+function eventoFactura(e: Fila): NonNullable<FacturaCompleta["evento"]> {
+  return { id: String(e.id), titulo: String(e.titulo), fecha: String(e.fecha) };
+}
+
 async function completarFactura(f: Fila): Promise<FacturaCompleta> {
   const factura = aFactura(f);
 
-  const lineas = (
-    await all<Fila>("select * from factura_lineas where factura_id = ? order by orden asc", factura.id)
-  ).map(aFacturaLinea);
+  const [lineas, c, e] = await Promise.all([
+    all<Fila>(
+      "select * from factura_lineas where factura_id = ? order by orden asc",
+      factura.id
+    ),
+    factura.cliente_id
+      ? get<Fila>(
+          `select id, nombre, tipo, cif_nif, direccion, poblacion, provincia, cp, retiene_irpf
+           from clientes where id = ?`,
+          factura.cliente_id
+        )
+      : Promise.resolve(null),
+    factura.evento_id
+      ? get<Fila>("select id, titulo, fecha from eventos where id = ?", factura.evento_id)
+      : Promise.resolve(null),
+  ]);
 
-  let cliente: FacturaCompleta["cliente"] = null;
-  if (factura.cliente_id) {
-    const c = await get<Fila>(
+  return {
+    ...factura,
+    cliente: c ? clienteFactura(c) : null,
+    evento: e ? eventoFactura(e) : null,
+    factura_lineas: lineas.map(aFacturaLinea),
+  };
+}
+
+/** Igual que `completarFactura`, pero con 3 consultas para N facturas. */
+async function completarFacturas(filas: Fila[]): Promise<FacturaCompleta[]> {
+  if (!filas.length) return [];
+
+  const facturas = filas.map(aFactura);
+  const clienteIds = facturas
+    .map((f) => f.cliente_id)
+    .filter((id): id is string => Boolean(id));
+  const eventoIds = facturas
+    .map((f) => f.evento_id)
+    .filter((id): id is string => Boolean(id));
+
+  const [lineas, clientes, eventos] = await Promise.all([
+    filasPorIds<Fila>(
+      "select * from factura_lineas where factura_id in (%IDS%) order by factura_id asc, orden asc",
+      facturas.map((f) => f.id)
+    ),
+    filasPorIds<Fila>(
       `select id, nombre, tipo, cif_nif, direccion, poblacion, provincia, cp, retiene_irpf
-       from clientes where id = ?`,
-      factura.cliente_id
-    );
-    if (c) {
-      cliente = {
-        id: String(c.id),
-        nombre: String(c.nombre),
-        tipo: c.tipo as Cliente["tipo"],
-        cif_nif: (c.cif_nif as string) ?? null,
-        direccion: (c.direccion as string) ?? null,
-        poblacion: (c.poblacion as string) ?? null,
-        provincia: (c.provincia as string) ?? null,
-        cp: (c.cp as string) ?? null,
-        retiene_irpf: bool(c.retiene_irpf as number),
-      };
-    }
+       from clientes where id in (%IDS%)`,
+      clienteIds
+    ),
+    filasPorIds<Fila>(
+      "select id, titulo, fecha from eventos where id in (%IDS%)",
+      eventoIds
+    ),
+  ]);
+
+  const porCliente = new Map(clientes.map((c) => [String(c.id), clienteFactura(c)]));
+  const porEvento = new Map(eventos.map((e) => [String(e.id), eventoFactura(e)]));
+  const porFactura = new Map<string, FacturaLinea[]>();
+  for (const fila of lineas) {
+    const linea = aFacturaLinea(fila);
+    const grupo = porFactura.get(linea.factura_id) ?? [];
+    grupo.push(linea);
+    porFactura.set(linea.factura_id, grupo);
   }
 
-  let evento: FacturaCompleta["evento"] = null;
-  if (factura.evento_id) {
-    const e = await get<Fila>(
-      "select id, titulo, fecha from eventos where id = ?",
-      factura.evento_id
-    );
-    if (e) {
-      evento = { id: String(e.id), titulo: String(e.titulo), fecha: String(e.fecha) };
-    }
-  }
-
-  return { ...factura, cliente, evento, factura_lineas: lineas };
+  return facturas.map((factura) => ({
+    ...factura,
+    cliente: factura.cliente_id ? (porCliente.get(factura.cliente_id) ?? null) : null,
+    evento: factura.evento_id ? (porEvento.get(factura.evento_id) ?? null) : null,
+    factura_lineas: porFactura.get(factura.id) ?? [],
+  }));
 }
 
 export async function getFacturas(desde: string, hasta: string): Promise<FacturaCompleta[]> {
@@ -960,7 +1009,7 @@ export async function getFacturas(desde: string, hasta: string): Promise<Factura
     desde,
     hasta
   );
-  return Promise.all(filas.map(completarFactura));
+  return completarFacturas(filas);
 }
 
 export async function getFactura(id: string): Promise<FacturaCompleta | null> {
