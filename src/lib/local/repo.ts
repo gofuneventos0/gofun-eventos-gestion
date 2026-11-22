@@ -143,25 +143,94 @@ async function lineasDe(eventoId: string): Promise<EventoLinea[]> {
   return filas.map(aLinea);
 }
 
+/** SQLite admite hasta 999 parámetros; dejamos margen para no romper con Turso. */
+const TAMANO_LOTE = 400;
+
+function enTrozos<T>(valores: T[], tamano = TAMANO_LOTE): T[][] {
+  const salida: T[][] = [];
+  for (let i = 0; i < valores.length; i += tamano) {
+    salida.push(valores.slice(i, i + tamano));
+  }
+  return salida;
+}
+
+/** Ejecuta `sql` sustituyendo `%IDS%` por los marcadores del lote. */
+async function filasPorIds<T extends Fila>(sql: string, ids: string[]): Promise<T[]> {
+  const unicos = [...new Set(ids)].filter(Boolean);
+  if (!unicos.length) return [];
+  const lotes = await Promise.all(
+    enTrozos(unicos).map((lote) =>
+      all<T>(
+        sql.replace("%IDS%", lote.map(() => "?").join(",")),
+        ...lote
+      )
+    )
+  );
+  return lotes.flat();
+}
+
+function clienteResumen(c: Fila): NonNullable<EventoCompleto["cliente"]> {
+  return {
+    id: String(c.id),
+    nombre: String(c.nombre),
+    tipo: c.tipo as Cliente["tipo"],
+    retiene_irpf: bool(c.retiene_irpf as number),
+    telefono: (c.telefono as string) ?? null,
+  };
+}
+
 async function completar(f: Fila): Promise<EventoCompleto> {
   const evento = aEvento(f);
-  let cliente: EventoCompleto["cliente"] = null;
-  if (evento.cliente_id) {
-    const c = await get<Fila>(
-      "select id, nombre, tipo, retiene_irpf, telefono from clientes where id = ?",
-      evento.cliente_id
-    );
-    if (c) {
-      cliente = {
-        id: String(c.id),
-        nombre: String(c.nombre),
-        tipo: c.tipo as Cliente["tipo"],
-        retiene_irpf: bool(c.retiene_irpf as number),
-        telefono: (c.telefono as string) ?? null,
-      };
-    }
+  const [c, lineas] = await Promise.all([
+    evento.cliente_id
+      ? get<Fila>(
+          "select id, nombre, tipo, retiene_irpf, telefono from clientes where id = ?",
+          evento.cliente_id
+        )
+      : Promise.resolve(null),
+    lineasDe(evento.id),
+  ]);
+  return { ...evento, cliente: c ? clienteResumen(c) : null, evento_lineas: lineas };
+}
+
+/**
+ * Versión por lotes: 3 consultas para N eventos en vez de 1 + 2N.
+ * Mantiene exactamente la misma forma de datos que `completar`.
+ */
+async function completarVarios(filas: Fila[]): Promise<EventoCompleto[]> {
+  if (!filas.length) return [];
+
+  const eventos = filas.map(aEvento);
+  const ids = eventos.map((e) => e.id);
+  const clienteIds = eventos
+    .map((e) => e.cliente_id)
+    .filter((id): id is string => Boolean(id));
+
+  const [clientes, lineas] = await Promise.all([
+    filasPorIds<Fila>(
+      "select id, nombre, tipo, retiene_irpf, telefono from clientes where id in (%IDS%)",
+      clienteIds
+    ),
+    filasPorIds<Fila>(
+      "select * from evento_lineas where evento_id in (%IDS%) order by evento_id asc, orden asc",
+      ids
+    ),
+  ]);
+
+  const porCliente = new Map(clientes.map((c) => [String(c.id), clienteResumen(c)]));
+  const porEvento = new Map<string, EventoLinea[]>();
+  for (const fila of lineas) {
+    const linea = aLinea(fila);
+    const grupo = porEvento.get(linea.evento_id) ?? [];
+    grupo.push(linea);
+    porEvento.set(linea.evento_id, grupo);
   }
-  return { ...evento, cliente, evento_lineas: await lineasDe(evento.id) };
+
+  return eventos.map((evento) => ({
+    ...evento,
+    cliente: evento.cliente_id ? (porCliente.get(evento.cliente_id) ?? null) : null,
+    evento_lineas: porEvento.get(evento.id) ?? [],
+  }));
 }
 
 const JUNTAR =
@@ -217,7 +286,7 @@ export async function getCliente(id: string): Promise<Cliente | null> {
 
 export async function getEventosRango(desde: string, hasta: string): Promise<EventoCompleto[]> {
   const filas = await all<Fila>(JUNTAR, desde, hasta);
-  return Promise.all(filas.map(completar));
+  return completarVarios(filas);
 }
 
 export async function getEvento(id: string): Promise<EventoCompleto | null> {
@@ -252,7 +321,7 @@ export async function getEventos(opciones?: {
     (opciones?.limite ? ` limit ?` : "");
   if (opciones?.limite) params.push(opciones.limite);
   const filas = await all<Fila>(sql, ...params);
-  return Promise.all(filas.map(completar));
+  return completarVarios(filas);
 }
 
 export async function getProximosEventos(limite = 6, desde: string): Promise<EventoCompleto[]> {
@@ -264,7 +333,7 @@ export async function getProximosEventos(limite = 6, desde: string): Promise<Eve
     desde,
     limite
   );
-  return Promise.all(filas.map(completar));
+  return completarVarios(filas);
 }
 
 export async function getConteoEstados(
