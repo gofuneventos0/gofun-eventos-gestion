@@ -55,19 +55,27 @@ El esquema se crea solo (tablas + semilla) la primera vez que se usa la base.
 ## Despliegue en Netlify
 
 La app está preparada para Netlify (Next.js 16 con su runtime; `netlify.toml`
-y `.nvmrc` incluidos). En serverless **no hay sistema de archivos persistente**,
-así que producción debe usar Turso.
+y `.nvmrc` incluidos). Hay dos modos de persistencia:
 
-1. **Turso**: crea la base y anota URL + token (ver Opción B).
-2. **Conecta el repo en Netlify** (*Add new site → Import an existing project*).
+- **Sin configurar nada (por defecto):** la SQLite se guarda en **Netlify Blobs**
+  (`gofun-db`), un almacenamiento persistente que no se pausa. La app funciona
+  nada más hacer push, con `admin` / `admin`.
+- **Con Turso:** si defines `TURSO_DATABASE_URL` y `TURSO_AUTH_TOKEN`, se usa
+  Turso en lugar de Blobs (útil si quieres SQL remoto y varios despliegues).
+
+1. **Conecta el repo en Netlify** (*Add new site → Import an existing project*).
    Netlify detecta Next.js automáticamente (`npm run build` y `.next`) y respeta
    `.nvmrc` (Node 24).
-3. **Variables de entorno** en *Site → Configuration → Environment variables*:
-   - `TURSO_DATABASE_URL`
-   - `TURSO_AUTH_TOKEN`
-   - `GOFUN_SESION_SECRET`
+2. **Variables de entorno** en *Site → Configuration → Environment variables*:
+   - `GOFUN_SESION_SECRET` (obligatorio en producción: secreto largo y aleatorio).
+   - Opcionales, solo si prefieres Turso: `TURSO_DATABASE_URL` y
+     `TURSO_AUTH_TOKEN`.
 
    Tras cambiarlas, lanza un rebuild en *Deploys → Trigger deploy*.
+
+Detalle: en modo Blobs el archivo SQLite se descarga de Blobs a `/tmp` al
+iniciar cada función y se vuelve a subir tras cada escritura (con escritura
+condicional por ETag para evitar sobrescrituras entre peticiones concurrentes).
 
 ### Repo y despliegue automático
 

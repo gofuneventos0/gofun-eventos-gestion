@@ -1,18 +1,21 @@
 import { createClient, type Client, type InValue } from "@libsql/client";
+import { getStore } from "@netlify/blobs";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { hashPassword } from "./password";
 
 /**
- * Base de datos SQLite mediante libSQL (Turso).
+ * Base de datos SQLite mediante libSQL.
  *
- * - Producción (Netlify): Turso. Se configura con TURSO_DATABASE_URL y
- *   TURSO_AUTH_TOKEN. La conexión es HTTP, así que funciona en serverless
- *   sin depender del sistema de archivos.
- * - Desarrollo: si no hay variables de Turso, usa un archivo local
- *   data/gofun.db (ignorado por git). Mismo esquema y mismas consultas.
+ * - Con TURSO_DATABASE_URL: usa Turso (HTTP, pensado para producción).
+ * - En local: archivo data/gofun.db (ignorado por git).
+ * - En Netlify sin Turso configurado: el archivo vive en /tmp y se sincroniza
+ *   con **Netlify Blobs** (persistente, sin pausas y sin credenciales extra).
+ *   Las funciones serverless no tienen disco persistente, así que este es el
+ *   modo que hace que el despliegue funcione "tal cual" desde GitHub.
  *
  * El esquema se crea y se siembra de forma perezosa al primer uso, una sola
  * vez por proceso.
@@ -24,11 +27,105 @@ const TOKEN_DB = (process.env.TURSO_AUTH_TOKEN ?? "").trim();
 /** true si estamos conectados a Turso (producción) y false en local. */
 export const usandoTurso = URL_DB.length > 0;
 
-let clientePromesa: Promise<Client> | null = null;
+/** Netlify inyecta estas variables en Functions/Edge Functions. */
+export const enNetlify = Boolean(
+  process.env.NETLIFY_BLOBS_CONTEXT || process.env.NETLIFY === "true"
+);
 
-function crearCliente(): Client {
+/** Modo de persistencia serverless sin Turso. */
+export const usandoBlobs = enNetlify && !usandoTurso;
+
+const BLOB_STORE = "gofun-db";
+const BLOB_KEY = "gofun.db";
+const ARCHIVO_BLOBS = path.join(os.tmpdir(), `gofun-libsql-${process.pid}.db`);
+
+let clientePromesa: Promise<Client> | null = null;
+let etagBlob: string | undefined;
+
+function store() {
+  return getStore({ name: BLOB_STORE, consistency: "strong" });
+}
+
+async function descargarBlob(): Promise<void> {
+  const entrada = await store().getWithMetadata(BLOB_KEY, {
+    consistency: "strong",
+    type: "arrayBuffer",
+  });
+  etagBlob = entrada?.etag;
+  if (entrada?.data) {
+    fs.writeFileSync(ARCHIVO_BLOBS, Buffer.from(entrada.data as ArrayBuffer));
+  } else if (fs.existsSync(ARCHIVO_BLOBS)) {
+    fs.unlinkSync(ARCHIVO_BLOBS);
+  }
+}
+
+type Sentencia = { sql: string; args: InValue[] };
+
+async function subir(contenido: Buffer, etag: string | undefined): Promise<boolean> {
+  const opciones = etag ? { onlyIfMatch: etag } : { onlyIfNew: true };
+  const bytes = new Uint8Array(contenido);
+  const buffer = bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength
+  ) as ArrayBuffer;
+  const { modified } = await store().set(BLOB_KEY, buffer, opciones);
+  return modified;
+}
+
+/** Reaplica la escritura sobre la versión más reciente si otra petición ganó la carrera. */
+async function fusionar(sentencias: Sentencia[], intentos = 4): Promise<boolean> {
+  for (let i = 0; i < intentos; i++) {
+    const actual = await store().getWithMetadata(BLOB_KEY, {
+      consistency: "strong",
+      type: "arrayBuffer",
+    });
+    const archivo = `${ARCHIVO_BLOBS}.merge-${i}.db`;
+    if (fs.existsSync(archivo)) fs.unlinkSync(archivo);
+    if (actual?.data) fs.writeFileSync(archivo, Buffer.from(actual.data as ArrayBuffer));
+
+    const cliente = createClient({ url: pathToFileURL(archivo).href });
+    try {
+      if (sentencias.length === 1) {
+        await cliente.execute({ sql: sentencias[0].sql, args: sentencias[0].args });
+      } else if (sentencias.length > 1) {
+        await cliente.batch(sentencias.map((s) => ({ sql: s.sql, args: s.args })));
+      }
+    } finally {
+      cliente.close();
+    }
+
+    if (await subir(fs.readFileSync(archivo), actual?.etag)) {
+      etagBlob = actual?.etag;
+      return true;
+    }
+  }
+  return false;
+}
+
+async function guardarCambios(sentencias: Sentencia[]): Promise<void> {
+  if (!usandoBlobs) return;
+
+  const contenido = fs.readFileSync(ARCHIVO_BLOBS);
+  if (await subir(contenido, etagBlob)) {
+    const entrada = await store().getMetadata(BLOB_KEY, { consistency: "strong" });
+    etagBlob = entrada?.etag;
+    return;
+  }
+  if (!(await fusionar(sentencias))) {
+    throw new Error("No se pudieron guardar los cambios: otra petición está escribiendo. Inténtalo de nuevo.");
+  }
+}
+
+async function crearCliente(): Promise<Client> {
   if (usandoTurso) {
     return createClient({ url: URL_DB, authToken: TOKEN_DB || undefined });
+  }
+
+  if (usandoBlobs) {
+    await descargarBlob();
+    const cliente = createClient({ url: pathToFileURL(ARCHIVO_BLOBS).href });
+    await cliente.execute("PRAGMA journal_mode = DELETE");
+    return cliente;
   }
 
   const archivo = path.join(process.cwd(), "data", "gofun.db");
@@ -38,9 +135,13 @@ function crearCliente(): Client {
 
 function obtenerCliente(): Promise<Client> {
   if (!clientePromesa) {
-    const cliente = crearCliente();
-    clientePromesa = inicializar(cliente)
-      .then(() => cliente)
+    clientePromesa = crearCliente()
+      .then(async (cliente) => {
+        await inicializar(cliente);
+        // El esquema y la semilla también son cambios que hay que persistir.
+        if (usandoBlobs) await guardarCambios([]);
+        return cliente;
+      })
       .catch((error) => {
         // Si falla el primer acceso (red, credenciales…), permitimos reintentar.
         clientePromesa = null;
@@ -77,6 +178,7 @@ export async function get<T = Fila>(sql: string, ...args: InValue[]): Promise<T 
 export async function run(sql: string, ...args: InValue[]): Promise<void> {
   const cliente = await obtenerCliente();
   await cliente.execute({ sql, args });
+  await guardarCambios([{ sql, args }]);
 }
 
 /** Ejecuta un lote de escrituras de forma atómica. */
@@ -85,10 +187,9 @@ export async function batch(
 ): Promise<void> {
   if (!sentencias.length) return;
   const cliente = await obtenerCliente();
-  await cliente.batch(
-    sentencias.map((s) => ({ sql: s.sql, args: s.args ?? [] })),
-    "write"
-  );
+  const completas = sentencias.map((s) => ({ sql: s.sql, args: s.args ?? [] }));
+  await cliente.batch(completas, "write");
+  await guardarCambios(completas);
 }
 
 // ------------------------------------------------------------
