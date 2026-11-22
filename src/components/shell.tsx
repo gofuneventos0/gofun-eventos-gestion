@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { salirSesion } from "@/lib/actions/auth";
+import { moduloVisible } from "@/lib/modulos";
 
 const NAV = [
   { href: "/panel", label: "Panel", icon: LayoutDashboard },
@@ -29,7 +30,7 @@ const NAV = [
   { href: "/clientes", label: "Clientes", icon: Users },
   { href: "/catalogo", label: "Catálogo", icon: Package },
   { href: "/configuracion", label: "Configuración", icon: Settings },
-];
+].filter(({ href }) => moduloVisible(href));
 
 export default function Shell({
   children,

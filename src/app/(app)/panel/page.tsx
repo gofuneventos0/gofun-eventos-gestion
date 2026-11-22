@@ -206,14 +206,6 @@ export default async function PanelPage() {
               </div>
             ))}
           </Tarjeta>
-
-          <div className="mt-4 rounded-xl border border-dashed border-gray-300 bg-white p-4">
-            <p className="text-sm font-semibold text-tinta-950">Siguientes fases</p>
-            <p className="mt-1 text-xs leading-relaxed text-tinta-600">
-              Tesorería (caja y banco), facturación con IVA/IRPF y gastos llegarán en las fases 2 y 3.
-              Aquí verás el beneficio real del trimestre.
-            </p>
-          </div>
         </section>
       </div>
     </>

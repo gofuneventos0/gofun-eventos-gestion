@@ -14,6 +14,8 @@ import {
 import { getCobrosEvento, getEvento, getFacturaEvento } from "@/lib/data";
 import { euros, fechaCorta, fechaLarga, hora } from "@/lib/format";
 import { ESTADOS_FACTURA, labelTipoCliente, labelZona } from "@/lib/constantes";
+import { moduloVisible } from "@/lib/modulos";
+import type { FacturaCompleta, Movimiento } from "@/lib/types";
 import { CLASE_BOTON_MARCA, CLASE_BOTON_SUAVE, EtiquetaEstado, Tarjeta } from "@/components/ui";
 import AccionesEvento from "@/components/acciones-evento";
 
@@ -40,7 +42,12 @@ export default async function EventoPage(props: PageProps<"/eventos/[id]">) {
 
   const importeRef = Number(evento.importe_total) > 0 ? Number(evento.importe_total) : totalLineas;
 
-  const [cobros, factura] = await Promise.all([getCobrosEvento(id), getFacturaEvento(id)]);
+  // Si los módulos están ocultos, tampoco consultamos sus datos: es donde se
+  // nota la mejora de velocidad al abrir el detalle de un evento.
+  const mostrarFinanzas = moduloVisible("/facturacion") || moduloVisible("/tesoreria");
+  const [cobros, factura]: [Movimiento[], FacturaCompleta | null] = mostrarFinanzas
+    ? await Promise.all([getCobrosEvento(id), getFacturaEvento(id)])
+    : [[], null];
   const cobrado = cobros.reduce((s, c) => s + c.importe, 0);
   const pendiente = Math.max(0, importeRef - cobrado);
   const pctCobrado = importeRef > 0 ? Math.min(100, Math.round((cobrado / importeRef) * 100)) : 0;
@@ -209,130 +216,133 @@ export default async function EventoPage(props: PageProps<"/eventos/[id]">) {
 
           <AccionesEvento id={evento.id} estado={evento.estado} />
 
-          {/* Facturación */}
-          <Tarjeta className="p-5">
-            <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-tinta-600">
-              Facturación
-            </h2>
-            {factura ? (
-              <>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-bold text-tinta-950">{factura.numero}</span>
-                  <span
-                    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${ESTADOS_FACTURA[factura.estado].chip}`}
-                  >
+          {/* Facturación (oculta con el módulo; la ruta sigue activa) */}
+          {moduloVisible("/facturacion") && (
+            <Tarjeta className="p-5">
+              <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-tinta-600">
+                Facturación
+              </h2>
+              {factura ? (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-bold text-tinta-950">{factura.numero}</span>
                     <span
-                      className={`h-1.5 w-1.5 rounded-full ${ESTADOS_FACTURA[factura.estado].punto}`}
-                    />
-                    {ESTADOS_FACTURA[factura.estado].label}
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-tinta-600">
-                  {fechaCorta(factura.fecha)} · {euros(factura.total)}
-                </p>
-                <Link
-                  href={`/facturacion/${factura.id}`}
-                  className={`${CLASE_BOTON_SUAVE} mt-3 w-full`}
-                >
-                  <Receipt className="h-4 w-4" /> Ver factura
-                </Link>
-              </>
-            ) : !evento.cliente ? (
-              <>
-                <p className="text-sm text-tinta-600">
-                  Añade un cliente al evento para poder facturarlo.
-                </p>
-                <Link
-                  href={`/eventos/${evento.id}/editar`}
-                  className={`${CLASE_BOTON_SUAVE} mt-3 w-full`}
-                >
-                  <Pencil className="h-4 w-4" /> Editar evento
-                </Link>
-              </>
-            ) : totalLineas === 0 ? (
-              <>
-                <p className="text-sm text-tinta-600">
-                  Añade atracciones con precio para poder generar la factura.
-                </p>
-                <Link
-                  href={`/eventos/${evento.id}/editar`}
-                  className={`${CLASE_BOTON_SUAVE} mt-3 w-full`}
-                >
-                  <Pencil className="h-4 w-4" /> Editar evento
-                </Link>
-              </>
-            ) : (
-              <>
-                <p className="text-sm text-tinta-600">
-                  Genera la factura con IVA {`${evento.cliente.retiene_irpf ? "y retención de IRPF" : "sin retención"}`} según
-                  el cliente.
-                </p>
-                <Link
-                  href={`/facturacion/nueva?evento=${evento.id}`}
-                  className={`${CLASE_BOTON_MARCA} mt-3 w-full`}
-                >
-                  <PlusCircle className="h-4 w-4" /> Generar factura
-                </Link>
-              </>
-            )}
-          </Tarjeta>
+                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${ESTADOS_FACTURA[factura.estado].chip}`}
+                    >
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${ESTADOS_FACTURA[factura.estado].punto}`}
+                      />
+                      {ESTADOS_FACTURA[factura.estado].label}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-tinta-600">
+                    {fechaCorta(factura.fecha)} · {euros(factura.total)}
+                  </p>
+                  <Link
+                    href={`/facturacion/${factura.id}`}
+                    className={`${CLASE_BOTON_SUAVE} mt-3 w-full`}
+                  >
+                    <Receipt className="h-4 w-4" /> Ver factura
+                  </Link>
+                </>
+              ) : !evento.cliente ? (
+                <>
+                  <p className="text-sm text-tinta-600">
+                    Añade un cliente al evento para poder facturarlo.
+                  </p>
+                  <Link
+                    href={`/eventos/${evento.id}/editar`}
+                    className={`${CLASE_BOTON_SUAVE} mt-3 w-full`}
+                  >
+                    <Pencil className="h-4 w-4" /> Editar evento
+                  </Link>
+                </>
+              ) : totalLineas === 0 ? (
+                <>
+                  <p className="text-sm text-tinta-600">
+                    Añade atracciones con precio para poder generar la factura.
+                  </p>
+                  <Link
+                    href={`/eventos/${evento.id}/editar`}
+                    className={`${CLASE_BOTON_SUAVE} mt-3 w-full`}
+                  >
+                    <Pencil className="h-4 w-4" /> Editar evento
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-tinta-600">
+                    Genera la factura con IVA {`${evento.cliente.retiene_irpf ? "y retención de IRPF" : "sin retención"}`} según
+                    el cliente.
+                  </p>
+                  <Link
+                    href={`/facturacion/nueva?evento=${evento.id}`}
+                    className={`${CLASE_BOTON_MARCA} mt-3 w-full`}
+                  >
+                    <PlusCircle className="h-4 w-4" /> Generar factura
+                  </Link>
+                </>
+              )}
+            </Tarjeta>
+          )}
 
-          {/* Cobros */}
-          <Tarjeta className="p-5">
-            <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-tinta-600">
-              Cobros del evento
-            </h2>
-            <div className="flex items-baseline justify-between">
-              <span className="text-sm text-tinta-600">Total</span>
-              <span className="text-lg font-extrabold text-tinta-950">{euros(importeRef)}</span>
-            </div>
-            <div className="mt-1 flex items-baseline justify-between">
-              <span className="text-sm text-tinta-600">Cobrado</span>
-              <span className="text-sm font-bold text-emerald-700">{euros(cobrado)}</span>
-            </div>
-            <div className="mt-1 flex items-baseline justify-between">
-              <span className="text-sm text-tinta-600">Pendiente</span>
-              <span
-                className={`text-sm font-bold ${
-                  pendiente > 0 ? "text-amber-700" : "text-emerald-700"
-                }`}
+          {moduloVisible("/tesoreria") && (
+            <Tarjeta className="p-5">
+              <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-tinta-600">
+                Cobros del evento
+              </h2>
+              <div className="flex items-baseline justify-between">
+                <span className="text-sm text-tinta-600">Total</span>
+                <span className="text-lg font-extrabold text-tinta-950">{euros(importeRef)}</span>
+              </div>
+              <div className="mt-1 flex items-baseline justify-between">
+                <span className="text-sm text-tinta-600">Cobrado</span>
+                <span className="text-sm font-bold text-emerald-700">{euros(cobrado)}</span>
+              </div>
+              <div className="mt-1 flex items-baseline justify-between">
+                <span className="text-sm text-tinta-600">Pendiente</span>
+                <span
+                  className={`text-sm font-bold ${
+                    pendiente > 0 ? "text-amber-700" : "text-emerald-700"
+                  }`}
+                >
+                  {euros(pendiente)}
+                </span>
+              </div>
+
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-100">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    pendiente > 0 ? "bg-marca-500" : "bg-emerald-500"
+                  }`}
+                  style={{ width: `${pctCobrado}%` }}
+                />
+              </div>
+              <p className="mt-1 text-right text-xs text-tinta-600">{pctCobrado}% cobrado</p>
+
+              <Link
+                href={`/tesoreria?accion=cobro&evento=${evento.id}`}
+                className={`${CLASE_BOTON_SUAVE} mt-3 w-full`}
               >
-                {euros(pendiente)}
-              </span>
-            </div>
+                <HandCoins className="h-4 w-4" /> Registrar cobro
+              </Link>
 
-            <div className="mt-3 h-2 overflow-hidden rounded-full bg-gray-100">
-              <div
-                className={`h-full rounded-full transition-all ${
-                  pendiente > 0 ? "bg-marca-500" : "bg-emerald-500"
-                }`}
-                style={{ width: `${pctCobrado}%` }}
-              />
-            </div>
-            <p className="mt-1 text-right text-xs text-tinta-600">{pctCobrado}% cobrado</p>
-
-            <Link
-              href={`/tesoreria?accion=cobro&evento=${evento.id}`}
-              className={`${CLASE_BOTON_SUAVE} mt-3 w-full`}
-            >
-              <HandCoins className="h-4 w-4" /> Registrar cobro
-            </Link>
-
-            {cobros.length > 0 && (
-              <ul className="mt-3 space-y-1.5 border-t border-gray-100 pt-3">
-                {cobros.map((c) => (
-                  <li key={c.id} className="flex items-center justify-between gap-2 text-xs">
-                    <span className="min-w-0 truncate text-tinta-600">
-                      {fechaCorta(c.fecha)} · {c.concepto}
-                    </span>
-                    <span className="shrink-0 font-semibold text-emerald-700">
-                      {euros(c.importe)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Tarjeta>
+              {cobros.length > 0 && (
+                <ul className="mt-3 space-y-1.5 border-t border-gray-100 pt-3">
+                  {cobros.map((c) => (
+                    <li key={c.id} className="flex items-center justify-between gap-2 text-xs">
+                      <span className="min-w-0 truncate text-tinta-600">
+                        {fechaCorta(c.fecha)} · {c.concepto}
+                      </span>
+                      <span className="shrink-0 font-semibold text-emerald-700">
+                        {euros(c.importe)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Tarjeta>
+          )}
         </div>
       </div>
     </>
