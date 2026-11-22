@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ComponentType } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -32,6 +32,48 @@ const NAV = [
   { href: "/configuracion", label: "Configuración", icon: Settings },
 ].filter(({ href }) => moduloVisible(href));
 
+/**
+ * Con loading.tsx, el prefetch automático solo trae hasta el skeleton. Al
+ * mostrar intención (hover/foco/tap) pedimos también el contenido de la página
+ * para que el click no tenga que esperar a la consulta a la BD.
+ */
+function EnlaceNav({
+  href,
+  label,
+  icon: Icon,
+  resaltado,
+  alNavegar,
+}: {
+  href: string;
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+  resaltado: boolean;
+  alNavegar?: () => void;
+}) {
+  const [calentado, setCalentado] = useState(false);
+  const calentar = () => setCalentado(true);
+
+  return (
+    <Link
+      href={href}
+      prefetch={calentado ? true : "auto"}
+      onMouseEnter={calentar}
+      onFocus={calentar}
+      onTouchStart={calentar}
+      onClick={alNavegar}
+      aria-current={resaltado ? "page" : undefined}
+      className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition ${
+        resaltado
+          ? "bg-marca-500/15 text-marca-400"
+          : "text-slate-400 hover:bg-white/5 hover:text-white"
+      }`}
+    >
+      <Icon className="h-[18px] w-[18px]" />
+      {label}
+    </Link>
+  );
+}
+
 export default function Shell({
   children,
   correo,
@@ -51,24 +93,16 @@ export default function Shell({
 
   const nav = (
     <nav className="flex flex-1 flex-col gap-1 px-3">
-      {NAV.map(({ href, label, icon: Icon }) => {
-        const activo = pathname === href || pathname.startsWith(href + "/");
-        return (
-          <Link
-            key={href}
-            href={href}
-            onClick={() => setAbierto(false)}
-            className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition ${
-              activo
-                ? "bg-marca-500/15 text-marca-400"
-                : "text-slate-400 hover:bg-white/5 hover:text-white"
-            }`}
-          >
-            <Icon className="h-[18px] w-[18px]" />
-            {label}
-          </Link>
-        );
-      })}
+      {NAV.map(({ href, label, icon }) => (
+        <EnlaceNav
+          key={href}
+          href={href}
+          label={label}
+          icon={icon}
+          resaltado={pathname === href || pathname.startsWith(href + "/")}
+          alNavegar={() => setAbierto(false)}
+        />
+      ))}
     </nav>
   );
 
