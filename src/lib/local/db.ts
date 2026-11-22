@@ -116,9 +116,23 @@ async function guardarCambios(sentencias: Sentencia[]): Promise<void> {
   }
 }
 
+/** Algunas versiones del CLI de Turso añaden `?direct`, que libSQL no admite. */
+function urlTursoCompatible(): string {
+  try {
+    const url = new URL(URL_DB);
+    url.searchParams.delete("direct");
+    return url.toString();
+  } catch {
+    return URL_DB.split("?")[0];
+  }
+}
+
 async function crearCliente(): Promise<Client> {
   if (usandoTurso) {
-    return createClient({ url: URL_DB, authToken: TOKEN_DB || undefined });
+    return createClient({
+      url: urlTursoCompatible(),
+      authToken: TOKEN_DB || undefined,
+    });
   }
 
   if (usandoBlobs) {

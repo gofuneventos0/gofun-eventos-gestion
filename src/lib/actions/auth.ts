@@ -19,16 +19,7 @@ export async function acceder(
     return { ok: false, mensaje: "Introduce usuario y contraseña." };
   }
 
-  let usuario;
-  try {
-    usuario = await autenticarLocal(email, password);
-  } catch (error) {
-    const e = error as Error;
-    return {
-      ok: false,
-      mensaje: `DEBUG ${e.name}: ${e.message} | ${(e.stack ?? "").slice(0, 600)}`,
-    };
-  }
+  const usuario = await autenticarLocal(email, password);
   if (!usuario) return { ok: false, mensaje: "Usuario o contraseña incorrectos." };
 
   const token = await firmarSesion(usuario.id);

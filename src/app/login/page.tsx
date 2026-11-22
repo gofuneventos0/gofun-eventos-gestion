@@ -35,8 +35,8 @@ export default async function LoginPage(props: PageProps<"/login">) {
           <p className="mt-4 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-xs leading-relaxed text-slate-400">
             <span className="font-semibold text-marca-400">Desarrollo</span> · base de datos local
             con usuario <code className="rounded bg-black/40 px-1 py-0.5">admin</code> y contraseña{" "}
-            <code className="rounded bg-black/40 px-1 py-0.5">admin</code>. En producción los
-            datos viven en Turso (ver README).
+            <code className="rounded bg-black/40 px-1 py-0.5">admin</code>. En Netlify los datos
+            se guardan en Netlify Blobs (o en Turso si está configurado).
           </p>
         )}
 

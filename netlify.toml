@@ -6,10 +6,6 @@
 command = "npm run build"
 publish = ".next"
 
-# La persistencia va contra Turso (libSQL). La app NO usa el sistema de
-# archivos en producción: sin estas variables arrancaría en modo local con
-# SQLite, que no persiste en serverless. Configúralas en
-# Site → Configuration → Environment variables:
-#   TURSO_DATABASE_URL     (turso db show <bd> --url)
-#   TURSO_AUTH_TOKEN       (turso db tokens create <bd>)
-#   GOFUN_SESION_SECRET    (cadena larga y aleatoria)
+# Persistencia por defecto: Netlify Blobs (store `gofun-db`), sin credenciales.
+# Si se configuran TURSO_DATABASE_URL y TURSO_AUTH_TOKEN se usa Turso en su lugar.
+# Recomendado en producción: GOFUN_SESION_SECRET (cadena larga y aleatoria).
