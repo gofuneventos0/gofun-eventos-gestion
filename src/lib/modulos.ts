@@ -9,6 +9,7 @@ export const MODULOS_OCULTOS = [
   "/facturacion",
   "/amortizaciones",
   "/tesoreria",
+  "/clientes",
 ] as const;
 
 /** Devuelve true si la ruta (o alguna subclave) no está oculta. */

@@ -201,12 +201,14 @@ export default async function EventoPage(props: PageProps<"/eventos/[id]">) {
                     </a>
                   </p>
                 )}
-                <Link
-                  href={`/clientes?q=${encodeURIComponent(evento.cliente.nombre)}`}
-                  className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-marca-600 hover:text-marca-500"
-                >
-                  <Mail className="h-3.5 w-3.5" /> Ver ficha del cliente
-                </Link>
+                {moduloVisible("/clientes") && (
+                  <Link
+                    href={`/clientes?q=${encodeURIComponent(evento.cliente.nombre)}`}
+                    className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-marca-600 hover:text-marca-500"
+                  >
+                    <Mail className="h-3.5 w-3.5" /> Ver ficha del cliente
+                  </Link>
+                )}
               </div>
             ) : (
               <p className="text-sm text-tinta-600">

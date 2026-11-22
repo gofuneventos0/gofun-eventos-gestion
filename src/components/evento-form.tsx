@@ -15,6 +15,7 @@ import {
   labelCategoria,
 } from "@/lib/constantes";
 import { euros, hoyISO } from "@/lib/format";
+import { moduloVisible } from "@/lib/modulos";
 import { Aviso, Campo, CLASE_BOTON, CLASE_BOTON_MARCA, CLASE_BOTON_SUAVE, CLASE_INPUT } from "@/components/ui";
 import BotonEnviar from "@/components/boton-enviar";
 
@@ -150,12 +151,14 @@ export default function EventoForm({
                 </option>
               ))}
             </select>
-            <span className="mt-1 block text-xs text-tinta-600">
-              ¿Cliente nuevo?{" "}
-              <Link href="/clientes" className="font-medium text-marca-600 underline">
-                Créalo en Clientes
-              </Link>
-            </span>
+            {moduloVisible("/clientes") && (
+              <span className="mt-1 block text-xs text-tinta-600">
+                ¿Cliente nuevo?{" "}
+                <Link href="/clientes" className="font-medium text-marca-600 underline">
+                  Créalo en Clientes
+                </Link>
+              </span>
+            )}
           </Campo>
 
           <Campo label="Tipo de evento">
