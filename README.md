@@ -85,6 +85,17 @@ El sitio de Netlify está conectado a este mismo repo y despliega la rama
 `development`. Cada `git push origin development` sube el código y Netlify
 **redespliega solo**.
 
+### Flujo de trabajo (importante: límite de pushes en Netlify)
+
+Netlify tiene un límite diario de pushes/builds, así que **no se hace un push
+por cambio**:
+
+1. Trabajar en local y hacer **un commit local por cada desarrollo terminado**.
+2. **No hacer `git push`** después de cada commit.
+3. Solo cuando el usuario lo pida explícitamente, hacer **un único push**
+   (`git push origin development`) con todos los commits acumulados. Así Netlify
+   hace una sola build.
+
 ## Estructura
 
 ```
