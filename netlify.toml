@@ -1,0 +1,4 @@
+# El modo local usa `node:sqlite`, disponible sin flags desde Node 22.5.
+# Fijamos Node 24 para que Build y Functions usen la misma versión.
+[build.environment]
+  NODE_VERSION = "24"

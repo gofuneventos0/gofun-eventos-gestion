@@ -6,6 +6,7 @@ import { esModoLocal } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 import { COOKIE_SESION, firmarSesion } from "@/lib/local/sesion";
 import { autenticarLocal } from "@/lib/local/auth";
+import { inicializarDb } from "@/lib/local/db";
 import { texto, type Resultado } from "./form";
 
 /**
@@ -26,6 +27,7 @@ export async function acceder(
   }
 
   if (esModoLocal()) {
+    await inicializarDb();
     const usuario = autenticarLocal(email, password);
     if (!usuario) return { ok: false, mensaje: "Usuario o contraseña incorrectos." };
 

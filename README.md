@@ -27,8 +27,9 @@ Cuando quieras pasar a producción con el equipo, crea el proyecto de Supabase y
 rellena `.env.local` (opción B): la app detecta las credenciales y cambia a
 Supabase automáticamente sin tocar código.
 
-> El modo local es para desarrollo/pruebas. Para datos reales del negocio usa
-> Supabase (opción B), que tiene RLS y copias de seguridad.
+> El modo local también es el que se usa en el despliegue de Netlify: allí la
+> base SQLite se guarda en **Netlify Blobs** (ver sección de despliegue), por lo
+> que los datos son persistentes y no dependen de ningún servicio que se pause.
 
 ### Opción B — Supabase (producción)
 
@@ -49,8 +50,7 @@ Supabase automáticamente sin tocar código.
    catálogo real de la web y los packs.
 5. Crea un usuario del equipo en **Authentication → Users → Add user**.
 
-Hasta que existan credenciales reales, la app muestra una pantalla de
-configuración en `/login`.
+Si no hay credenciales reales, la app usa el modo local (SQLite + `admin/admin`).
 
 ### 2. Instalar y arrancar
 
@@ -61,6 +61,27 @@ npm run dev
 
 Abre [http://localhost:3000](http://localhost:3000). El `proxy` redirige
 cualquier ruta privada sin sesión a `/login`.
+
+### Despliegue en Netlify (modo local persistente)
+
+El repositorio incluye `netlify.toml` fijando Node 24 (necesario para
+`node:sqlite`) y Netlify detecta automáticamente Next.js. No hace falta crear
+ninguna base de datos externa:
+
+1. Conecta el repo a Netlify y deja las variables `NEXT_PUBLIC_SUPABASE_*` sin
+   rellenar (o con los valores de `.env.example`). La app entrará en modo local.
+2. **Importante:** añade en *Site configuration → Environment variables* una
+   variable `GOFUN_SESION_SECRET` con un valor largo y aleatorio. Sin ella se
+   usa un secreto de desarrollo y cualquiera podría forjar la cookie de sesión.
+3. La primera petición crea el archivo SQLite dentro del store `gofun-db` de
+   **Netlify Blobs** (se aprovisiona solo). Ese blob es el único archivo de
+   datos: sobrevive a deploys, reinicios y periodos de inactividad.
+
+Detalle técnico: las funciones de Netlify no pueden escribir en disco de forma
+persistente, así que `src/lib/local/db.ts` descarga el blob a `/tmp` al iniciar
+la petición y lo vuelve a subir al terminar (con `after()` y escritura
+condicional por ETag para evitar sobrescrituras entre peticiones concurrentes).
+En local se sigue usando `data/gofun.db` como siempre.
 
 ## Estructura
 

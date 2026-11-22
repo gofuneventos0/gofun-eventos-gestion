@@ -1,36 +1,66 @@
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
+import { getStore } from "@netlify/blobs";
+import { after } from "next/server";
 import { hashPassword } from "./password";
 
 /**
- * Base SQLite local (modo local, sin Supabase).
- * El archivo vive en /data/gofun.db (ignorado por git). El esquema replica
- * supabase/migrations/20261008120000_init.sql.
+ * Base SQLite del modo local (sin Supabase).
  *
- * La conexión se abre de forma perezosa (al primer uso): evita que los workers
- * de `next build` se pisen al evaluar los módulos a la vez.
+ * - En development / servidor propio: el archivo vive en `data/gofun.db`
+ *   (ignorado por git).
+ * - En Netlify: las funciones no tienen disco persistente (solo `/tmp`, que
+ *   se pierde entre invocaciones). El archivo se descarga de **Netlify Blobs**
+ *   al arrancar la función y se vuelve a subir al terminar la petición. Así los
+ *   datos sobreviven a deploys y a periodos de inactividad, sin depender de un
+ *   servicio externo que pueda pausarse.
+ *
+ * El esquema replica supabase/migrations/*.sql.
  */
 
 const DIR = path.join(process.cwd(), "data");
 const FILE = path.join(DIR, "gofun.db");
 
+/** Netlify inyecta estas variables en Functions/Edge Functions. */
+export function enNetlify(): boolean {
+  return Boolean(process.env.NETLIFY_BLOBS_CONTEXT || process.env.NETLIFY === "true");
+}
+
+const BLOB_STORE = "gofun-db";
+const BLOB_KEY = "gofun.db";
+const ARCHIVO_TMP = path.join(os.tmpdir(), `gofun-${process.pid}.db`);
+
 let instancia: DatabaseSync | null = null;
+let promesaNetlify: Promise<void> | null = null;
+let etagBlob: string | undefined;
+let sucio = false;
+let cadenaGuardado: Promise<void> = Promise.resolve();
 
-function abrir(): DatabaseSync {
-  if (instancia) return instancia;
+interface Sentencia {
+  sql: string;
+  params: SQLInputValue[];
+}
+let pendientes: Sentencia[] = [];
 
-  fs.mkdirSync(DIR, { recursive: true });
-  const d = new DatabaseSync(FILE);
+function registrar(sql: string, params: SQLInputValue[] = []): void {
+  if (!enNetlify()) return;
+  pendientes.push({ sql, params });
+  sucio = true;
+}
+
+function abrirBase(file: string, journal: "WAL" | "DELETE"): DatabaseSync {
+  const d = new DatabaseSync(file);
 
   // El primer arranque concurrente (build, varios procesos) puede dar
-  // "database is locked": se reintenta hasta que el otro proceso cedan.
+  // "database is locked": se reintenta hasta que el otro proceso ceda.
   let reintentos = 0;
   for (;;) {
     try {
       d.exec("PRAGMA busy_timeout = 10000;");
-      d.exec("PRAGMA journal_mode = WAL;");
+      d.exec(`PRAGMA journal_mode = ${journal};`);
       d.exec("PRAGMA foreign_keys = ON;");
       break;
     } catch (e) {
@@ -46,9 +76,137 @@ function abrir(): DatabaseSync {
 
   d.exec(ESQUEMA);
   sembrar(d);
-
-  instancia = d;
   return d;
+}
+
+function abrir(): DatabaseSync {
+  if (instancia) return instancia;
+
+  if (enNetlify()) {
+    // `inicializarDb()` ya ha descargado el blob a ARCHIVO_TMP antes de que
+    // se ejecute cualquier consulta (lo llaman data.ts y las Server Actions).
+    throw new Error(
+      "La base de datos de Netlify todavía no se ha inicializado (falta await inicializarDb())."
+    );
+  }
+
+  fs.mkdirSync(DIR, { recursive: true });
+  instancia = abrirBase(FILE, "WAL");
+  return instancia;
+}
+
+// ------------------------------------------------------------
+// Persistencia en Netlify Blobs
+// ------------------------------------------------------------
+
+function store() {
+  return getStore({ name: BLOB_STORE, consistency: "strong" });
+}
+
+async function descargarBlob(): Promise<void> {
+  const entrada = await store().getWithMetadata(BLOB_KEY, {
+    consistency: "strong",
+    type: "arrayBuffer",
+  });
+  etagBlob = entrada?.etag;
+
+  if (entrada?.data) {
+    fs.writeFileSync(ARCHIVO_TMP, Buffer.from(entrada.data as ArrayBuffer));
+  } else if (fs.existsSync(ARCHIVO_TMP)) {
+    fs.unlinkSync(ARCHIVO_TMP);
+  }
+
+  instancia = abrirBase(ARCHIVO_TMP, "DELETE");
+  // La apertura ejecuta el esquema y la semilla: aunque el blob ya existiera,
+  // puede haber cambios de esquema pendientes tras un deploy.
+  sucio = true;
+}
+
+/** Inicializa la BD (en Netlify, descarga el blob). Seguro llamarla varias veces. */
+export async function inicializarDb(): Promise<void> {
+  if (!enNetlify()) return;
+
+  if (!promesaNetlify) promesaNetlify = descargarBlob();
+  await promesaNetlify;
+
+  // La subida se hace después de responder para no añadir latencia, pero antes
+  // de que la función termine (Next mantiene vivas las promesas de `after`).
+  try {
+    after(() => guardarDb());
+  } catch {
+    // `after` no está disponible fuera de una petición (p. ej. build): en ese
+    // caso no hay escritura que persistir.
+  }
+}
+
+async function subir(contenido: Buffer, etag: string | undefined): Promise<boolean> {
+  const opciones = etag ? { onlyIfMatch: etag } : { onlyIfNew: true };
+  const bytes = new Uint8Array(contenido);
+  const buffer = bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength
+  ) as ArrayBuffer;
+  const { modified } = await store().set(BLOB_KEY, buffer, opciones);
+  return modified;
+}
+
+/** Reaplica las sentencias de la petición sobre la versión más reciente del blob. */
+async function fusionarCambios(intentos = 4): Promise<boolean> {
+  for (let i = 0; i < intentos; i++) {
+    const actual = await store().getWithMetadata(BLOB_KEY, {
+      consistency: "strong",
+      type: "arrayBuffer",
+    });
+
+    const archivoFusion = `${ARCHIVO_TMP}.merge-${i}.db`;
+    if (fs.existsSync(archivoFusion)) fs.unlinkSync(archivoFusion);
+    if (actual?.data) fs.writeFileSync(archivoFusion, Buffer.from(actual.data as ArrayBuffer));
+
+    const d = abrirBase(archivoFusion, "DELETE");
+    try {
+      for (const { sql, params } of pendientes) d.prepare(sql).run(...params);
+    } finally {
+      d.close();
+    }
+
+    if (await subir(fs.readFileSync(archivoFusion), actual?.etag)) {
+      etagBlob = actual?.etag;
+      // La instancia local se queda desactualizada: se recargará en la
+      // siguiente petición que llegue a este worker.
+      try {
+        instancia?.close();
+      } catch {
+        // Ya estaba cerrada.
+      }
+      promesaNetlify = null;
+      instancia = null;
+      return true;
+    }
+  }
+  return false;
+}
+
+async function guardarDb(): Promise<void> {
+  if (!enNetlify() || !instancia || !sucio) return;
+
+  const tarea = cadenaGuardado.then(async () => {
+    if (!sucio) return;
+
+    // Con WAL desactivado, el archivo principal contiene todas las escrituras.
+    const contenido = fs.readFileSync(ARCHIVO_TMP);
+    if (await subir(contenido, etagBlob)) {
+      const entrada = await store().getMetadata(BLOB_KEY, { consistency: "strong" });
+      etagBlob = entrada?.etag;
+    } else if (!(await fusionarCambios())) {
+      throw new Error("No se pudieron guardar los cambios: otra petición está escribiendo. Inténtalo de nuevo.");
+    }
+
+    pendientes = [];
+    sucio = false;
+  });
+
+  cadenaGuardado = tarea.catch(() => undefined);
+  await tarea;
 }
 
 // ------------------------------------------------------------
@@ -322,10 +480,37 @@ function sembrar(d: DatabaseSync) {
 /**
  * Proxy con inicialización perezosa: `db.prepare(...)` abre la conexión la
  * primera vez que se usa. Así los procesos/threads no compiten al importar.
+ * En Netlify registra las escrituras para subir el blob al terminar la petición.
  */
 export const db: DatabaseSync = new Proxy({} as DatabaseSync, {
   get(_target, prop) {
     const real = abrir();
+
+    if (prop === "prepare") {
+      return (sql: string) => {
+        const stmt = real.prepare(sql);
+        return new Proxy(stmt, {
+          get(s, p) {
+            const v = (s as unknown as Record<PropertyKey, unknown>)[p];
+            if (p === "run" && typeof v === "function") {
+              return (...params: SQLInputValue[]) => {
+                registrar(sql, params);
+                return (v as (...args: SQLInputValue[]) => unknown).apply(s, params);
+              };
+            }
+            return typeof v === "function" ? (v as (...args: unknown[]) => unknown).bind(s) : v;
+          },
+        });
+      };
+    }
+
+    if (prop === "exec") {
+      return (sql: string) => {
+        registrar(sql);
+        return real.exec(sql);
+      };
+    }
+
     const v = (real as unknown as Record<PropertyKey, unknown>)[prop];
     return typeof v === "function" ? (v as (...args: unknown[]) => unknown).bind(real) : v;
   },

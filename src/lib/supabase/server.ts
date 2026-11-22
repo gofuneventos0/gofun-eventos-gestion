@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { isSupabaseConfigured, esModoLocal, supabaseUrl, supabaseAnonKey } from "./env";
 import { COOKIE_SESION, verificarToken } from "@/lib/local/sesion";
 import { obtenerUsuarioPorId } from "@/lib/local/auth";
+import { inicializarDb } from "@/lib/local/db";
 
 /**
  * Cliente de Supabase para Server Components y Server Actions.
@@ -42,6 +43,7 @@ export async function createClient() {
  */
 export async function getSessionUser() {
   if (esModoLocal()) {
+    await inicializarDb();
     const token = (await cookies()).get(COOKIE_SESION)?.value;
     if (!token) return null;
     const userId = await verificarToken(token);
